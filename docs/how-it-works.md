@@ -4,8 +4,9 @@
 
 `ddev fire-worktree-start`, which `create` also runs:
 
-1. Writes `.ddev/config.worktree.local.yaml` with the worktree's DDEV project name and hostnames.
-2. Copies the gitignored files in `WORKTREE_COPY_FILES` that the worktree doesn't have.
+1. Copies the gitignored files in `WORKTREE_COPY_FILES` that the worktree doesn't have, so a copied
+   `config.local.yaml` applies from the first start.
+2. Writes `.ddev/config.worktree.local.yaml` with the worktree's DDEV project name and hostnames.
 3. Starts the project, seeding a new database from `--db`.
 4. Runs `ddev composer install` when the project has a `composer.json`.
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints

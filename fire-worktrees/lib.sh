@@ -438,26 +438,39 @@ fw::populate_hint() {
   fi
 }
 
+# fw::copy_list: FW_ROOT's WORKTREE_COPY_FILES.
+fw::copy_list() {
+  local docroot
+  docroot=$(fw::config_scalar "$FW_ROOT" docroot)
+  fw::setting "$FW_ROOT" WORKTREE_COPY_FILES ".ddev/config.local.yaml ${docroot:+$docroot/}sites/default/settings.local.php"
+}
+
 # fw::copy_files SOURCE: copy gitignored local files that FW_ROOT lacks.
 fw::copy_files() {
-  local docroot list rel
+  local rel seen=' ' more=true
   local -a files
   [[ -d "$1" && "$1" != "$FW_ROOT" ]] || return 0
-  docroot=$(fw::config_scalar "$FW_ROOT" docroot)
-  list=$(fw::setting "$FW_ROOT" WORKTREE_COPY_FILES ".ddev/config.local.yaml ${docroot:+$docroot/}sites/default/settings.local.php")
-  read -r -a files <<<"$list"
-  for rel in ${files[@]+"${files[@]}"}; do
-    case $rel in
-      /* | *..*)
-        fw::warn "Skipping $rel in WORKTREE_COPY_FILES; use a path inside the project."
-        continue
-        ;;
-    esac
-    if [[ -f "$1/$rel" && ! -e "$FW_ROOT/$rel" && ! -L "$FW_ROOT/$rel" ]]; then
-      mkdir -p "$(dirname "$FW_ROOT/$rel")"
-      cp "$1/$rel" "$FW_ROOT/$rel"
-      printf 'Copied %s\n' "$rel"
-    fi
+  # A copied config.local.yaml can change the list, so read it again after
+  # each pass that copies something.
+  while [[ "$more" == true ]]; do
+    more=false
+    read -r -a files <<<"$(fw::copy_list)"
+    for rel in ${files[@]+"${files[@]}"}; do
+      [[ "$seen" != *" $rel "* ]] || continue
+      seen="$seen$rel "
+      case $rel in
+        /* | *..*)
+          fw::warn "Skipping $rel in WORKTREE_COPY_FILES; use a path inside the project."
+          continue
+          ;;
+      esac
+      if [[ -f "$1/$rel" && ! -e "$FW_ROOT/$rel" && ! -L "$FW_ROOT/$rel" ]]; then
+        mkdir -p "$(dirname "$FW_ROOT/$rel")"
+        cp "$1/$rel" "$FW_ROOT/$rel"
+        printf 'Copied %s\n' "$rel"
+        more=true
+      fi
+    done
   done
 }
 
@@ -519,6 +532,12 @@ fw::start_worktree() {
     done
   ) || exit 1
 
+  # Copy local files first, so a copied config.local.yaml sets the name and
+  # hostnames. Creation names its source checkout. Otherwise use T3's hint, then
+  # the primary.
+  source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
+  fw::copy_files "$source"
+
   # Reuse the name of an existing environment, including ones the replaced
   # project-local commands created, so the worktree keeps its database.
   FW_NAME=$(fw::generated_name "$FW_ROOT")
@@ -549,10 +568,6 @@ fw::start_worktree() {
     printf '/.ddev/%s\n' "$FW_CONFIG_NAME" >>"$FW_COMMON_DIR/info/exclude"
   fi
   fw::registry_add "$FW_NAME" "$FW_ROOT"
-
-  # Creation names its source checkout. Otherwise use T3's hint, then the primary.
-  source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
-  fw::copy_files "$source"
   printf 'Configured DDEV project %s\n' "$FW_NAME"
 
   if [[ -n "$FW_PRIMARY_ROOT" && "$FW_ROOT" == "$FW_PRIMARY_ROOT"/* ]]; then
