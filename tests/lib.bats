@@ -175,3 +175,40 @@ EOF
   assert_failure
   assert_output --partial "--db must be primary, latest, fresh"
 }
+
+@test "the first start honors the config.local.yaml it copies in" {
+  # The team's settings, committed.
+  cat >"${SITE}/.ddev/config.yaml" <<'YAML'
+name: widener
+type: php
+additional_hostnames:
+    - alumni.widener
+web_environment:
+    - WORKTREE_NAME_PREFIX=wid
+YAML
+  printf '/.ddev/config.local.yaml\n/notes.txt\n' >"${SITE}/.gitignore"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+  # A developer's own settings, which only the primary checkout has so far.
+  cat >"${SITE}/.ddev/config.local.yaml" <<'YAML'
+web_environment:
+    - WORKTREE_NAME_PREFIX=zz
+    - WORKTREE_COPY_FILES=.ddev/config.local.yaml notes.txt
+additional_hostnames:
+    - extra.widener
+YAML
+  echo notes >"${SITE}/notes.txt"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_output --partial "Configured DDEV project zz-feature-x-"
+  assert_output --partial "Copied notes.txt"
+  run fw::yaml_list "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}" additional_hostnames
+  assert_output --regexp '^alumni\.zz-feature-x-[0-9]+
+extra\.zz-feature-x-[0-9]+$'
+}
