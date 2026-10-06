@@ -1,0 +1,23 @@
+name: fire-worktrees
+
+# v1.25.4 added `ddev start --seed-snapshot`, which copies the primary checkout's
+# database into a new worktree, and made nested projects defer to the registered
+# project around them, which fire-worktree-start handles.
+ddev_version_constraint: '>= v1.25.4'
+
+project_files:
+  - commands/host/fire-worktree-create
+  - commands/host/fire-worktree-start
+  - commands/host/fire-worktree-list
+  - commands/host/fire-worktree-remove
+  - commands/host/fire-worktree-prune
+  - fire-worktrees/lib.sh
+
+post_install_actions:
+  - |
+    #ddev-description: Check for project copies of the worktree commands
+    for f in worktree-create worktree-start worktree-remove; do
+      if [ -e "${DDEV_APPROOT}/.ddev/commands/host/$f" ]; then
+        echo "Delete .ddev/commands/host/$f; ddev-fire-worktrees provides 'ddev $f' as an alias of fire-$f."
+      fi
+    done

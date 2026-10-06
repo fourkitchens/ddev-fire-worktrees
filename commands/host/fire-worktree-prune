@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Delete DDEV projects whose worktree checkout is gone, such as after T3 deletes a thread
+## Usage: fire-worktree-prune [--yes]
+## Example: ddev fire-worktree-prune\nddev fire-worktree-prune --yes
+## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Delete what the dry run lists"}]
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+yes=false
+case ${1:-} in
+  '') ;;
+  -y | --yes) yes=true ;;
+  -h | --help)
+    echo 'Usage: ddev fire-worktree-prune [--yes]'
+    echo "Lists DDEV projects that fire-worktree-start created for this repository whose"
+    echo 'checkout no longer exists. With --yes, deletes them and their databases.'
+    exit 0
+    ;;
+  *) fw::die 'Usage: ddev fire-worktree-prune [--yes]' ;;
+esac
+[[ $# -le 1 ]] || fw::die 'Usage: ddev fire-worktree-prune [--yes]'
+
+fw::context "$PWD"
+registry=$(fw::registry_file)
+
+# Names of environments that still have a checkout.
+live=
+while IFS= read -r line; do
+  case $line in
+    'worktree '*)
+      path=${line#worktree }
+      if [[ -d "$path" ]]; then
+        live="$live$(fw::generated_name "$path")"$'\n'
+      fi
+      ;;
+  esac
+done < <(git -C "$FW_ROOT" worktree list --porcelain)
+
+orphans=
+stale=
+if [[ -f "$registry" ]]; then
+  while IFS=$'\t' read -r name path; do
+    [[ -n "$name" ]] || continue
+    if printf '%s' "$live" | grep -qxF "$name"; then
+      continue
+    fi
+    if ddev describe "$name" >/dev/null 2>&1 || fw::db_volume_exists "$name"; then
+      orphans="$orphans$name"$'\t'"$path"$'\n'
+    else
+      stale="$stale$name"$'\n'
+    fi
+  done <"$registry"
+fi
+
+# Projects from the project-local commands this add-on replaced have no registry
+# entry. Their names can't prove which clone created them, so only list them.
+prefix=$(fw::slug "$(fw::setting "$FW_ROOT" WORKTREE_NAME_PREFIX "$(fw::primary_name)")" 12)
+unregistered=
+while IFS= read -r volume; do
+  name=${volume%-*}
+  if printf '%s' "$live" | grep -qxF "$name" || printf '%s' "$orphans" | cut -f1 | grep -qxF "$name"; then
+    continue
+  fi
+  if [[ -f "$registry" ]] && cut -f1 "$registry" | grep -qxF "$name"; then
+    continue
+  fi
+  unregistered="$unregistered$name"$'\n'
+done < <(docker volume ls -q 2>/dev/null | grep -E "^$prefix-[a-z0-9-]+-[0-9]+-(mariadb|mysql|postgres)\$" || true)
+
+if [[ -n "$stale" ]]; then
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && fw::registry_remove "$name"
+  done <<<"$stale"
+fi
+
+if [[ -z "$orphans" ]]; then
+  echo 'No DDEV projects to prune.'
+else
+  echo 'DDEV projects whose worktree checkout is gone:'
+  printf '%s' "$orphans" | awk -F '\t' '{ printf "  %s  (was %s)\n", $1, $2 }'
+fi
+if [[ -n "$unregistered" ]]; then
+  printf '\nThese look like worktree projects from before this add-on, but may belong to another\nclone. Check with ddev list, then delete any you no longer need with ddev delete -Oy <name>:\n'
+  printf '%s' "$unregistered" | sed 's/^/  /'
+fi
+[[ -n "$orphans" ]] || exit 0
+
+if [[ "$yes" == false ]]; then
+  printf '\nDry run. Rerun with --yes to delete these projects and their databases.\n'
+  exit 0
+fi
+while IFS=$'\t' read -r name path; do
+  [[ -n "$name" ]] || continue
+  ddev delete --omit-snapshot --yes "$name"
+  fw::registry_remove "$name"
+done <<<"$orphans"
+git -C "$FW_ROOT" worktree prune
+echo 'Pruned.'

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Give this Git worktree its own DDEV project, hostnames and database, then start and build it
+## Usage: fire-worktree-start [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
+## Example: ddev fire-worktree-start\nddev fire-worktree-start --db=fresh
+## Aliases: worktree-start
+## Flags: [{"Name":"db","Type":"string","Usage":"Database for a new worktree: primary (snapshot the primary checkout), latest (its newest snapshot), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying a database"}]
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+usage='Usage: ddev fire-worktree-start [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]'
+db=
+build=true
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h | --help)
+      echo "$usage"
+      echo 'Gives the linked worktree you are in its own DDEV project, hostnames and database.'
+      echo 'Safe to rerun: an existing environment keeps its name and data.'
+      exit 0
+      ;;
+    --db=*) db=${1#--db=} ;;
+    --db)
+      [[ $# -ge 2 ]] || fw::die "$usage"
+      db=$2
+      shift
+      ;;
+    --no-build) build=false ;;
+    *) fw::die "$usage" ;;
+  esac
+  shift
+done
+
+# Host commands run in the caller's directory. Use it rather than DDEV_APPROOT,
+# which points at the primary project when this worktree is nested inside it.
+fw::start_worktree "$PWD" "$db" "$build"

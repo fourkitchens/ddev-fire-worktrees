@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Delete a linked Git worktree's DDEV project and database, then remove the checkout, keeping its branch
+## Usage: fire-worktree-remove [--yes] [--keep-checkout] [path]
+## Example: ddev fire-worktree-remove\nddev fire-worktree-remove ../mysite-abc-123-short-description\nddev fire-worktree-remove --keep-checkout
+## Aliases: worktree-remove
+## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Skip the confirmation prompt"},{"Name":"keep-checkout","Usage":"Delete only the DDEV project, for example before T3 deletes the checkout"}]
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+usage='Usage: ddev fire-worktree-remove [--yes] [--keep-checkout] [path]'
+yes=false
+keep_checkout=false
+path=
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h | --help)
+      echo "$usage"
+      echo 'Deletes the DDEV project and database of the worktree at path (default: the one'
+      echo 'you are in), then removes the checkout. The Git branch and its commits are kept.'
+      exit 0
+      ;;
+    -y | --yes) yes=true ;;
+    --keep-checkout) keep_checkout=true ;;
+    -*) fw::die "$usage" ;;
+    *)
+      [[ -z "$path" ]] || fw::die "$usage"
+      path=$1
+      ;;
+  esac
+  shift
+done
+
+caller_common=
+if git rev-parse --git-common-dir >/dev/null 2>&1; then
+  caller_common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
+fi
+[[ -d "${path:-.}" ]] || fw::die "${path:-.} is not a directory."
+fw::context "${path:-.}"
+if [[ -n "$caller_common" && "$caller_common" != "$FW_COMMON_DIR" ]]; then
+  fw::die "$FW_ROOT belongs to a different repository."
+fi
+if [[ "$FW_IS_PRIMARY" == true ]]; then
+  fw::die "$FW_ROOT is the primary checkout. Run fire-worktree-remove on a linked worktree."
+fi
+
+# Delete only a project that worktree startup configured. Without that file the
+# checkout resolves to the primary project's name.
+name=$(fw::generated_name "$FW_ROOT")
+primary=$(fw::primary_name)
+if [[ -n "$name" && "$name" == "$primary" ]]; then
+  fw::die "Refusing to delete the primary DDEV project $primary."
+fi
+has_project=false
+if [[ -n "$name" ]] && { ddev describe "$name" >/dev/null 2>&1 || fw::db_volume_exists "$name"; }; then
+  has_project=true
+fi
+
+if [[ "$keep_checkout" == false ]]; then
+  changes=$(git -C "$FW_ROOT" status --porcelain)
+  if [[ -n "$changes" ]]; then
+    printf 'Refusing to remove %s; commit, stash or discard these changes first:\n%s\n' "$FW_ROOT" "$changes" >&2
+    exit 1
+  fi
+fi
+branch=$(git -C "$FW_ROOT" symbolic-ref --quiet --short HEAD || true)
+
+echo 'This will:'
+if [[ "$has_project" == true ]]; then
+  echo "  - Delete DDEV project $name, including its database."
+else
+  echo '  - Skip DDEV: this worktree has no environment from fire-worktree-start.'
+fi
+if [[ "$keep_checkout" == false ]]; then
+  echo "  - Remove the checkout at $FW_ROOT."
+  echo "  - Keep branch ${branch:-(detached HEAD)}."
+fi
+if [[ "$yes" == false ]]; then
+  [[ -t 0 ]] || fw::die 'Pass --yes to confirm when not running interactively.'
+  read -r -p 'Continue? [y/N] ' answer || answer=
+  if [[ "$answer" != [yY] && "$answer" != [yY][eE][sS] ]]; then
+    echo 'Cancelled.'
+    exit 1
+  fi
+fi
+
+if [[ "$has_project" == true ]]; then
+  ddev delete --omit-snapshot --yes "$name"
+fi
+if [[ -n "$name" ]]; then
+  fw::registry_remove "$name"
+fi
+if [[ "$keep_checkout" == false ]]; then
+  # Point Git at the shared directory, since the target checkout disappears.
+  git --git-dir="$FW_COMMON_DIR" worktree remove "$FW_ROOT"
+  printf 'Removed %s.\n' "$FW_ROOT"
+  if [[ -n "$branch" ]]; then
+    printf 'Branch %s is kept. Delete it after merging with: git branch -d %s\n' "$branch" "$branch"
+  fi
+fi

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Create a branch in a sibling Git worktree, then give it its own DDEV project and database
+## Usage: fire-worktree-create <branch> [start-point] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
+## Example: ddev fire-worktree-create ABC-123-short-description\nddev fire-worktree-create ABC-123-short-description origin/main --db=fresh
+## Aliases: worktree-create
+## Flags: [{"Name":"db","Type":"string","Usage":"Database for the new worktree: primary (snapshot the primary checkout), latest (its newest snapshot), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"}]
+
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=fire-worktrees/lib.sh
+source "$here/../../fire-worktrees/lib.sh"
+
+usage='Usage: ddev fire-worktree-create <branch> [start-point] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]'
+branch=
+start_point=
+db=
+build=true
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h | --help)
+      echo "$usage"
+      echo 'Creates a new branch in a directory beside the primary checkout, then runs'
+      echo 'fire-worktree-start there. The start point defaults to WORKTREE_BASE_REF, else'
+      echo "the remote's default branch. It is used as-is; fetch first to update it."
+      exit 0
+      ;;
+    --db=*) db=${1#--db=} ;;
+    --db)
+      [[ $# -ge 2 ]] || fw::die "$usage"
+      db=$2
+      shift
+      ;;
+    --no-build) build=false ;;
+    -*) fw::die "$usage" ;;
+    *)
+      if [[ -z "$branch" ]]; then
+        branch=$1
+      elif [[ -z "$start_point" ]]; then
+        start_point=$1
+      else
+        fw::die "$usage"
+      fi
+      ;;
+  esac
+  shift
+done
+[[ -n "$branch" ]] || fw::die "$usage"
+
+# Startup runs in the new worktree, so resolve a file path from here first.
+case $db in
+  '' | primary | latest | fresh) ;;
+  *)
+    [[ -f "$db" ]] || fw::die "--db must be primary, latest, fresh, a snapshot or a SQL dump; got $db."
+    db="$(cd "$(dirname "$db")" && pwd -P)/$(basename "$db")"
+    ;;
+esac
+
+# The calling checkout, primary or not, is the source of copied local files.
+fw::context "$PWD"
+source_root=$FW_ROOT
+[[ -n "$FW_PRIMARY_ROOT" ]] || fw::die 'fire-worktree-create needs a primary checkout; bare repositories are not supported.'
+start_point=${start_point:-$(fw::setting "$FW_ROOT" WORKTREE_BASE_REF "")}
+start_point=${start_point:-$(fw::default_ref)}
+
+git -C "$FW_ROOT" check-ref-format --branch "$branch" >/dev/null || fw::die "$branch is not a valid branch name."
+if git -C "$FW_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
+  fw::die "Branch $branch already exists. Choose a new branch name."
+fi
+commit=$(git -C "$FW_ROOT" rev-parse --verify --quiet --end-of-options "${start_point}^{commit}") ||
+  fw::die "Can't find start point $start_point."
+
+slug=$(fw::slug "$branch" 80)
+target="$(dirname "$FW_PRIMARY_ROOT")/$(basename "$FW_PRIMARY_ROOT")-${slug:-worktree}"
+if [[ -e "$target" || -L "$target" ]]; then
+  fw::die "Destination already exists: $target. Choose a different branch name."
+fi
+
+git -C "$FW_ROOT" worktree add -b "$branch" "$target" "$commit"
+
+# Run this checkout's copy of startup in the new worktree, so a start point
+# that predates the add-on still works.
+set --
+if [[ -n "$db" ]]; then
+  set -- "--db=$db"
+fi
+if [[ "$build" == false ]]; then
+  set -- "$@" --no-build
+fi
+if ! (cd "$target" && WORKTREE_SOURCE_ROOT="$source_root" "$here/fire-worktree-start" "$@"); then
+  printf '\nCreated %s, but startup failed. Fix the error, then retry:\n' "$target" >&2
+  printf '  cd %q && ddev fire-worktree-start\n' "$target" >&2
+  exit 1
+fi
+printf '\nCreated branch %s from %s in:\n  %s\n' "$branch" "$start_point" "$target"

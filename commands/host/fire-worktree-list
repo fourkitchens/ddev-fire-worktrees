@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: List this repository's Git worktrees with their DDEV project, status, URL and uncommitted changes
+## Usage: fire-worktree-list
+## Example: ddev fire-worktree-list
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+case ${1:-} in
+  '') ;;
+  -h | --help)
+    echo 'Usage: ddev fire-worktree-list'
+    echo "Lists this repository's worktrees with their DDEV project, status, URL and uncommitted changes."
+    exit 0
+    ;;
+  *) fw::die 'Usage: ddev fire-worktree-list' ;;
+esac
+
+fw::context "$PWD"
+running=$(docker ps --filter label=com.ddev.site-name --format '{{.Names}}' 2>/dev/null || true)
+
+# fw_row PATH BRANCH: print one tab-separated row.
+fw_row() {
+  local path=$1 branch=$2 name='' status=- changes=- url=-
+  if [[ ! -d "$path" ]]; then
+    status='checkout missing'
+  elif [[ -f "$path/.ddev/config.yaml" ]]; then
+    if [[ "$path" == "$FW_PRIMARY_ROOT" ]]; then
+      name=$(fw::project_name_of "$path")
+      branch="$branch (primary)"
+    else
+      name=$(fw::generated_name "$path")
+    fi
+    changes=$(git -C "$path" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  if [[ -n "$name" ]]; then
+    url="https://$name.$(fw::tld "$path")"
+    if printf '%s\n' "$running" | grep -qx "ddev-$name-web"; then
+      status=running
+    elif fw::db_volume_exists "$name"; then
+      status=stopped
+    else
+      status='not started'
+    fi
+  elif [[ "$status" == - ]]; then
+    status='no environment'
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$branch" "${name:--}" "$status" "$changes" "$url" "$path"
+}
+
+{
+  printf 'BRANCH\tDDEV PROJECT\tSTATUS\tCHANGES\tURL\tPATH\n'
+  path=
+  branch=
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*) path=${line#worktree } ;;
+      'branch '*) branch=${line#branch refs/heads/} ;;
+      detached) branch='(detached)' ;;
+      bare) path= ;;
+      '')
+        if [[ -n "$path" ]]; then
+          fw_row "$path" "${branch:--}"
+        fi
+        path=
+        branch=
+        ;;
+    esac
+  done < <(git -C "$FW_ROOT" worktree list --porcelain && echo)
+} | awk -F '\t' '
+  {
+    if (NF > cols) cols = NF
+    for (i = 1; i <= NF; i++) { cell[NR, i] = $i; if (length($i) > width[i]) width[i] = length($i) }
+  }
+  END {
+    for (r = 1; r <= NR; r++) {
+      line = ""
+      for (i = 1; i <= cols; i++) line = line sprintf(i < cols ? "%-" width[i] "s  " : "%s", cell[r, i])
+      print line
+    }
+  }'
