@@ -1,12 +1,15 @@
 name: tests
 on:
+  # Every pull request, including docs-only ones, because the checks are required to merge.
   pull_request:
-    paths-ignore:
-      - "**.md"
   push:
     branches: [ main ]
     paths-ignore:
       - "**.md"
+
+  # A published release also runs the "install from release" test against it.
+  release:
+    types: [ published ]
 
   # Weekly, to catch DDEV changes before developers do.
   schedule:
