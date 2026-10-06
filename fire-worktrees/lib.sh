@@ -386,6 +386,18 @@ fw::seed_snapshot() {
   esac
 }
 
+# fw::db_arg VALUE: a --db value with any file path made absolute, so it still
+# points at the same file after the commands change directory.
+fw::db_arg() {
+  case $1 in
+    '' | primary | latest | fresh) printf '%s' "$1" ;;
+    *)
+      [[ -f "$1" ]] || fw::die "--db must be primary, latest, fresh, a snapshot or a SQL dump; got $1."
+      printf '%s/%s' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
+      ;;
+  esac
+}
+
 # fw::is_dump FILE: true for a file ddev import-db reads, such as FIRE's
 # reference/site-db.sql.gz, rather than a ddev snapshot.
 fw::is_dump() {

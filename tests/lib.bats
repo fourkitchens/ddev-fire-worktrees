@@ -162,3 +162,16 @@ EOF
   run fw::slug "abcdefghijk-xyz" 12
   assert_output "abcdefghijk"
 }
+
+@test "resolves a --db file from the caller's directory" {
+  mkdir -p "${TESTDIR}/here/reference"
+  touch "${TESTDIR}/here/reference/site-db.sql.gz"
+  cd "${TESTDIR}/here"
+  run fw::db_arg reference/site-db.sql.gz
+  assert_output "${TESTDIR}/here/reference/site-db.sql.gz"
+  run fw::db_arg latest
+  assert_output "latest"
+  run fw::db_arg missing.sql.gz
+  assert_failure
+  assert_output --partial "--db must be primary, latest, fresh"
+}

@@ -50,13 +50,7 @@ done
 [[ -n "$branch" ]] || fw::die "$usage"
 
 # Startup runs in the new worktree, so resolve a file path from here first.
-case $db in
-  '' | primary | latest | fresh) ;;
-  *)
-    [[ -f "$db" ]] || fw::die "--db must be primary, latest, fresh, a snapshot or a SQL dump; got $db."
-    db="$(cd "$(dirname "$db")" && pwd -P)/$(basename "$db")"
-    ;;
-esac
+db=$(fw::db_arg "$db")
 
 # The calling checkout, primary or not, is the source of copied local files.
 fw::context "$PWD"

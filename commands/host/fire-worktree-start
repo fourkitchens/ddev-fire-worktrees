@@ -37,4 +37,5 @@ done
 
 # Host commands run in the caller's directory. Use it rather than DDEV_APPROOT,
 # which points at the primary project when this worktree is nested inside it.
+db=$(fw::db_arg "$db")
 fw::start_worktree "$PWD" "$db" "$build"
