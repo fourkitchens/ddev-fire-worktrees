@@ -13,6 +13,7 @@ project_files:
   - commands/host/fire-worktree-remove
   - commands/host/fire-worktree-prune
   - fire-worktrees/lib.sh
+  - fire-worktrees/toolchain-fire.sh
 
 post_install_actions:
   - |

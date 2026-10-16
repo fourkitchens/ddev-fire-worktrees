@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: shellcheck -x -s bash commands/host/* fire-worktrees/lib.sh
+      - run: shellcheck -x -s bash commands/host/* fire-worktrees/*.sh
 
   tests:
     strategy:

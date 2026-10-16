@@ -608,7 +608,7 @@ fw::db_source() {
   printf '%s\t%s' "${source:-unknown}" "$file"
 }
 
-# fw::is_dump FILE: true for a file ddev import-db reads, such as FIRE's
+# fw::is_dump FILE: true for a file ddev import-db reads, such as
 # reference/site-db.sql.gz, rather than a ddev snapshot.
 fw::is_dump() {
   case $1 in
@@ -617,50 +617,69 @@ fw::is_dump() {
   return 1
 }
 
-# fw::has_site_build DIR: true when DIR has ddev-fire's site-build command and
-# DDEV offers it for DIR's project type.
-fw::has_site_build() {
-  local file="$1/.ddev/commands/host/site-build" types
-  [[ -f "$file" && -f "$1/.ddev/fire/scripts/lib.sh" ]] || return 1
-  types=$(sed -n 's/^## ProjectTypes:[[:space:]]*//p' "$file" | tr -d ' \t\r')
-  [[ -z "$types" || ",$types," == *",$(fw::config_scalar "$1" type),"* ]]
-}
+# Site toolchain: what a checkout's kind of site means for its worktrees (see
+# GLOSSARY.md). The base comes from the DDEV project type. An overlay can then
+# replace some of its answers. Only the files that register overlays know which
+# tools they detect.
 
-# fw::build_command DIR: the command that finishes a worktree after its database
-# is copied in, or "none".
-fw::build_command() {
-  local cmd
-  cmd=$(fw::setting "$1" WORKTREE_BUILD_COMMAND "")
-  if [[ -z "$cmd" ]]; then
-    # --skip-db-import also skips the database download.
-    if fw::has_site_build "$1"; then
-      cmd='ddev site-build --skip-db-import'
-    else
-      case $(fw::config_scalar "$1" type) in
-        # drush deploy needs Drupal 8.8 or later.
-        drupal6 | drupal7) cmd='ddev drush updb -y' ;;
-        drupal*) cmd='ddev drush deploy -y' ;;
-        *) cmd=none ;;
-      esac
-    fi
+# Overlays, in priority order. Each is a function taking DIR. One that applies
+# to DIR replaces FW_TOOLCHAIN_* values and returns 0; one that doesn't changes
+# nothing and returns 1. The first that applies is the only one.
+FW_TOOLCHAIN_OVERLAYS=()
+
+# fw::toolchain DIR: resolve DIR's site toolchain. Sets FW_TOOLCHAIN_BUILD, the
+# command that builds a worktree after a database copy, or none;
+# FW_TOOLCHAIN_HINT, how to fill an empty database; FW_TOOLCHAIN_ADVICE, which
+# startup prints after the build, usually empty; FW_TOOLCHAIN_LOGIN, true when
+# fw::toolchain_login_link can make a login link; and FW_TOOLCHAIN_COPY_FILES,
+# the gitignored files to copy into a new worktree. WORKTREE_BUILD_COMMAND and
+# WORKTREE_COPY_FILES win. It only reads DIR's files, so rerun it whenever they
+# may have changed.
+fw::toolchain() {
+  local type docroot overlay cmd
+  type=$(fw::config_scalar "$1" type)
+  docroot=$(fw::config_scalar "$1" docroot)
+  FW_TOOLCHAIN_BUILD=none
+  FW_TOOLCHAIN_HINT='ddev import-db --file=<dump>, or ddev pull <provider>'
+  FW_TOOLCHAIN_ADVICE=
+  FW_TOOLCHAIN_LOGIN=false
+  FW_TOOLCHAIN_COPY_FILES=".ddev/config.local.yaml ${docroot:+$docroot/}sites/default/settings.local.php"
+  case $type in
+    # drush deploy needs Drupal 8.8 or later.
+    drupal6 | drupal7) FW_TOOLCHAIN_BUILD='ddev drush updb -y' ;;
+    drupal*) FW_TOOLCHAIN_BUILD='ddev drush deploy -y' ;;
+  esac
+  if [[ "$type" == drupal* ]]; then
+    FW_TOOLCHAIN_LOGIN=true
   fi
-  printf '%s' "$cmd"
+  for overlay in ${FW_TOOLCHAIN_OVERLAYS[@]+"${FW_TOOLCHAIN_OVERLAYS[@]}"}; do
+    if "$overlay" "$1"; then
+      break
+    fi
+  done
+  cmd=$(fw::setting "$1" WORKTREE_BUILD_COMMAND "")
+  if [[ -n "$cmd" ]]; then
+    # The project chose its build, so advice about the default one is moot.
+    FW_TOOLCHAIN_BUILD=$cmd
+    FW_TOOLCHAIN_ADVICE=
+  fi
+  FW_TOOLCHAIN_COPY_FILES=$(fw::setting "$1" WORKTREE_COPY_FILES "$FW_TOOLCHAIN_COPY_FILES")
 }
 
-# fw::is_drupal DIR: true for DDEV's Drupal project types.
-fw::is_drupal() {
-  [[ "$(fw::config_scalar "$1" type)" == drupal* ]]
-}
-
-# fw::login_link URL: a one-time login link to the Drupal site at URL. Run it in
-# the worktree while its project is running. --uri overrides a DRUSH_OPTIONS_URI
-# the worktree inherited from the primary checkout.
-fw::login_link() {
+# fw::toolchain_login_link URL: a one-time login link to the site at URL, for
+# the toolchain fw::toolchain resolved. Run it in the worktree while its project
+# is running. --uri overrides a DRUSH_OPTIONS_URI the worktree inherited from
+# the primary checkout.
+fw::toolchain_login_link() {
   local link
+  [[ "${FW_TOOLCHAIN_LOGIN:-}" == true ]] || return 1
   link=$(ddev drush uli --no-browser --uri="$1" 2>/dev/null | tr -d '\r' | grep -E '^https?://' | tail -n 1) || true
   [[ -n "$link" ]] || return 1
   printf '%s' "$link"
 }
+
+# shellcheck source=fire-worktrees/toolchain-fire.sh
+source "$(dirname "${BASH_SOURCE[0]}")/toolchain-fire.sh"
 
 # fw::json TEXT: TEXT as a JSON string, or null when it's empty.
 fw::json() {
@@ -677,17 +696,6 @@ fw::json() {
   printf '"%s"' "$s"
 }
 
-# fw::populate_hint DIR: how to fill an empty database.
-fw::populate_hint() {
-  if fw::has_site_build "$1"; then
-    echo 'ddev site-build'
-  elif [[ -f "$1/fire.yml" ]]; then
-    echo 'fire build'
-  else
-    echo 'ddev import-db --file=<dump>, or ddev pull <provider>'
-  fi
-}
-
 # fw::build_failure DIR: what startup does when the build fails. fail exits 1;
 # warn exits 0, so an agent tool carries on in the running site.
 fw::build_failure() {
@@ -699,14 +707,8 @@ fw::build_failure() {
   esac
 }
 
-# fw::copy_list: FW_ROOT's WORKTREE_COPY_FILES.
-fw::copy_list() {
-  local docroot
-  docroot=$(fw::config_scalar "$FW_ROOT" docroot)
-  fw::setting "$FW_ROOT" WORKTREE_COPY_FILES ".ddev/config.local.yaml ${docroot:+$docroot/}sites/default/settings.local.php"
-}
-
-# fw::copy_files SOURCE: copy gitignored local files that FW_ROOT lacks.
+# fw::copy_files SOURCE: copy the toolchain's gitignored local files that
+# FW_ROOT lacks.
 fw::copy_files() {
   local rel seen=' ' more=true
   local -a files
@@ -715,7 +717,8 @@ fw::copy_files() {
   # each pass that copies something.
   while [[ "$more" == true ]]; do
     more=false
-    read -r -a files <<<"$(fw::copy_list)"
+    fw::toolchain "$FW_ROOT"
+    read -r -a files <<<"$FW_TOOLCHAIN_COPY_FILES"
     for rel in ${files[@]+"${files[@]}"}; do
       [[ "$seen" != *" $rel "* ]] || continue
       seen="$seen$rel "
@@ -900,27 +903,27 @@ fw::start_steps() {
   fi
 
   tld=$(fw::tld "$FW_ROOT")
+  fw::toolchain "$FW_ROOT"
   if [[ -n "$seed" || -n "$dump" ]]; then
-    cmd=$(fw::build_command "$FW_ROOT")
+    cmd=$FW_TOOLCHAIN_BUILD
     if [[ "$build" == true && "$cmd" != none ]]; then
       printf '\nBuilding with: %s\n' "$cmd"
       bash -c "$cmd" || build_failed=true
     elif [[ "$cmd" != none ]]; then
       printf '\nSkipped the build. To run it: %s\n' "$cmd"
     fi
-    if [[ -f fire.yml && "$cmd" == 'ddev drush '* && -z "$(fw::setting "$FW_ROOT" WORKTREE_BUILD_COMMAND "")" ]]; then
-      printf "This project uses FIRE, and drush deploy doesn't build its theme. To build everything\n"
-      printf 'after each copy, set WORKTREE_BUILD_COMMAND=fire build --no-db-import (see the add-on README).\n'
+    if [[ -n "$FW_TOOLCHAIN_ADVICE" ]]; then
+      printf '%s\n' "$FW_TOOLCHAIN_ADVICE"
     fi
   fi
 
   printf '\nWorktree URLs:\n'
   fw::urls "$FW_ROOT" "$FW_NAME" | sed 's/^/  /'
   if [[ "$new_db" == true && -z "$seed" && -z "$dump" ]]; then
-    printf 'To populate the database: %s\n' "$(fw::populate_hint "$FW_ROOT")"
-  elif fw::is_drupal "$FW_ROOT"; then
+    printf 'To populate the database: %s\n' "$FW_TOOLCHAIN_HINT"
+  elif [[ "$FW_TOOLCHAIN_LOGIN" == true ]]; then
     url="https://$FW_NAME.$tld"
-    if link=$(fw::login_link "$url"); then
+    if link=$(fw::toolchain_login_link "$url"); then
       printf 'One-time login link: %s\n' "$link"
     else
       fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"

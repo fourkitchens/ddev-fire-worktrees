@@ -43,9 +43,10 @@ urls=$(fw::urls "$FW_ROOT" "$name")
 url="https://$name.$(fw::tld "$FW_ROOT")"
 IFS=$'\t' read -r db_source db_file <<<"$(fw::db_source)"
 
+fw::toolchain "$FW_ROOT"
 login=
-if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
-  login=$(fw::login_link "$url") || fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+if [[ "$FW_TOOLCHAIN_LOGIN" == true && "$status" == running ]]; then
+  login=$(fw::toolchain_login_link "$url") || fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
 fi
 
 if [[ "$json" == true ]]; then
@@ -75,6 +76,6 @@ done <<<"$urls"
 printf 'Database:  %s\n' "$db_text"
 if [[ -n "$login" ]]; then
   printf 'Login:     %s\n' "$login"
-elif fw::is_drupal "$FW_ROOT" && [[ "$status" != running ]]; then
+elif [[ "$FW_TOOLCHAIN_LOGIN" == true && "$status" != running ]]; then
   printf 'Login:     start the project with ddev start, then rerun this command\n'
 fi

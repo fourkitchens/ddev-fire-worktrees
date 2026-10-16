@@ -99,57 +99,119 @@ EOF
   assert_output --partial "longer than 63 characters"
 }
 
-@test "picks a build command for each kind of project" {
-  printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "ddev drush deploy -y"
-  printf 'type: drupal\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "ddev drush deploy -y"
-  printf 'type: drupal7\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "ddev drush updb -y"
-  printf 'type: php\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "none"
+# fake_ddev_fire DIR: install ddev-fire's site-build command and library in DIR.
+fake_ddev_fire() {
+  mkdir -p "$1/.ddev/commands/host" "$1/.ddev/fire/scripts"
+  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal, drupal10, drupal11\n' >"$1/.ddev/commands/host/site-build"
+  touch "$1/.ddev/fire/scripts/lib.sh"
+}
 
-  # ddev-fire, when installed, builds the site. A project's own site-build
-  # command isn't ddev-fire's.
+@test "the project type picks the toolchain's base" {
+  printf 'type: drupal11\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush deploy -y"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "ddev import-db --file=<dump>, or ddev pull <provider>"
+  assert_equal "${FW_TOOLCHAIN_ADVICE}" ""
+  assert_equal "${FW_TOOLCHAIN_LOGIN}" true
+  assert_equal "${FW_TOOLCHAIN_COPY_FILES}" ".ddev/config.local.yaml web/sites/default/settings.local.php"
+  printf 'type: drupal\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush deploy -y"
+  assert_equal "${FW_TOOLCHAIN_COPY_FILES}" ".ddev/config.local.yaml sites/default/settings.local.php"
+  printf 'type: drupal7\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush updb -y"
+  assert_equal "${FW_TOOLCHAIN_LOGIN}" true
+  printf 'type: php\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "none"
+  assert_equal "${FW_TOOLCHAIN_LOGIN}" false
+  assert_equal "${FW_TOOLCHAIN_COPY_FILES}" ".ddev/config.local.yaml sites/default/settings.local.php"
+}
+
+@test "ddev-fire's overlay builds the site where DDEV offers its site-build" {
   printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
-  mkdir -p "${SITE}/.ddev/commands/host" "${SITE}/.ddev/fire/scripts"
-  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal, drupal10, drupal11\n' >"${SITE}/.ddev/commands/host/site-build"
-  run fw::build_command "${SITE}"
-  assert_output "ddev drush deploy -y"
-  touch "${SITE}/.ddev/fire/scripts/lib.sh"
-  run fw::build_command "${SITE}"
-  assert_output "ddev site-build --skip-db-import"
+  # A project's own site-build isn't ddev-fire's.
+  mkdir -p "${SITE}/.ddev/commands/host"
+  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal11\n' >"${SITE}/.ddev/commands/host/site-build"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush deploy -y"
+  fake_ddev_fire "${SITE}"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev site-build --skip-db-import"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "ddev site-build"
+  assert_equal "${FW_TOOLCHAIN_LOGIN}" true
 
   # DDEV hides site-build from project types it doesn't list.
   printf 'type: drupal7\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "ddev drush updb -y"
-
-  # The project setting wins, and a developer can override it locally.
-  printf 'type: drupal11\nweb_environment:\n  - WORKTREE_BUILD_COMMAND=fire build --no-db-import\n' >"${SITE}/.ddev/config.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "fire build --no-db-import"
-  printf 'web_environment: [WORKTREE_BUILD_COMMAND=none]\n' >"${SITE}/.ddev/config.local.yaml"
-  run fw::build_command "${SITE}"
-  assert_output "none"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush updb -y"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "ddev import-db --file=<dump>, or ddev pull <provider>"
 }
 
-@test "suggests how to fill an empty database" {
+@test "the FIRE CLI's overlay suggests fire build, and ddev-fire's wins over it" {
   printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
-  run fw::populate_hint "${SITE}"
-  assert_output "ddev import-db --file=<dump>, or ddev pull <provider>"
   touch "${SITE}/fire.yml"
-  run fw::populate_hint "${SITE}"
-  assert_output "fire build"
-  mkdir -p "${SITE}/.ddev/commands/host" "${SITE}/.ddev/fire/scripts"
-  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal, drupal10, drupal11\n' >"${SITE}/.ddev/commands/host/site-build"
-  touch "${SITE}/.ddev/fire/scripts/lib.sh"
-  run fw::populate_hint "${SITE}"
-  assert_output "ddev site-build"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush deploy -y"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "fire build"
+  run printf '%s' "${FW_TOOLCHAIN_ADVICE}"
+  assert_line --index 0 "This project uses FIRE, and drush deploy doesn't build its theme. To build everything"
+  assert_output --partial "set WORKTREE_BUILD_COMMAND=fire build --no-db-import."
+
+  # A project type with no build gets no advice about one.
+  printf 'type: php\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "fire build"
+  assert_equal "${FW_TOOLCHAIN_ADVICE}" ""
+
+  printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
+  fake_ddev_fire "${SITE}"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev site-build --skip-db-import"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "ddev site-build"
+  assert_equal "${FW_TOOLCHAIN_ADVICE}" ""
+}
+
+@test "the project's settings win over the toolchain" {
+  printf 'type: drupal11\nweb_environment:\n  - WORKTREE_BUILD_COMMAND=fire build --no-db-import\n  - WORKTREE_COPY_FILES=.env\n' >"${SITE}/.ddev/config.yaml"
+  touch "${SITE}/fire.yml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "fire build --no-db-import"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "fire build"
+  assert_equal "${FW_TOOLCHAIN_ADVICE}" ""
+  assert_equal "${FW_TOOLCHAIN_COPY_FILES}" ".env"
+
+  # A developer can override the team's setting locally.
+  printf 'web_environment: [WORKTREE_BUILD_COMMAND=none]\n' >"${SITE}/.ddev/config.local.yaml"
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "none"
+}
+
+@test "without the Fire overlays, a FIRE project gets the Drupal base" {
+  printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
+  touch "${SITE}/fire.yml"
+  fake_ddev_fire "${SITE}"
+  FW_TOOLCHAIN_OVERLAYS=()
+  fw::toolchain "${SITE}"
+  assert_equal "${FW_TOOLCHAIN_BUILD}" "ddev drush deploy -y"
+  assert_equal "${FW_TOOLCHAIN_HINT}" "ddev import-db --file=<dump>, or ddev pull <provider>"
+  assert_equal "${FW_TOOLCHAIN_ADVICE}" ""
+  assert_equal "${FW_TOOLCHAIN_LOGIN}" true
+}
+
+@test "only a toolchain that can log in makes a login link" {
+  ddev() { echo "${4#--uri=}/user/reset/1/abc/def/login"; }
+  printf 'type: php\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  run fw::toolchain_login_link https://x.ddev.site
+  assert_failure
+  assert_output ""
+  printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
+  fw::toolchain "${SITE}"
+  run fw::toolchain_login_link https://x.ddev.site
+  assert_success
+  assert_output "https://x.ddev.site/user/reset/1/abc/def/login"
 }
 
 @test "names the primary project from the primary checkout" {
@@ -444,6 +506,25 @@ YAML
   # Each start adds to the log, so a rerun keeps the failure it follows.
   run grep -c '^=== ' "${LOG}"
   assert_output 2
+}
+
+@test "start prints the toolchain's advice after a database copy" {
+  printf 'name: mysite\ntype: drupal11\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  touch "${WT}/fire.yml" "${TESTDIR}/site-db.sql.gz"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" false
+  assert_success
+  assert_line "Skipped the build. To run it: ddev drush deploy -y"
+  assert_line "This project uses FIRE, and drush deploy doesn't build its theme. To build everything"
+  assert_line --partial "in the add-on's docs/drupal.md."
 }
 
 @test "startup stops at the first error and points to the log" {

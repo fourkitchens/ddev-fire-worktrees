@@ -1,11 +1,15 @@
 # Contributing
 
+[`GLOSSARY.md`](../GLOSSARY.md) names the add-on's concepts, such as startup, the build and the
+site toolchain. Use those names in code, docs and pull requests. [`docs/adr/`](adr/) records
+decisions to keep, such as keeping all knowledge of Fire in `fire-worktrees/toolchain-fire.sh`.
+
 ## Running the tests
 
 ```bash
 brew install bats-core shellcheck
 brew tap bats-core/bats-core && brew install bats-support bats-assert bats-file
-shellcheck -x -s bash commands/host/* fire-worktrees/lib.sh
+shellcheck -x -s bash commands/host/* fire-worktrees/*.sh
 bats ./tests/lib.bats                           # library tests, a few seconds, no Docker
 bats ./tests/create.bats                        # create's branch and pull request handling, no Docker
 bats ./tests --filter-tags '!release'           # everything, with real DDEV projects
