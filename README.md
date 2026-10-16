@@ -75,7 +75,7 @@ deleting anything; pass `--yes` when no one is at the terminal.
 
 | Guide | Read it to |
 | --- | --- |
-| [Drupal projects](docs/drupal.md) | Set up a standard site, a FIRE project, or a multi-domain or multisite project. |
+| [Drupal projects](docs/drupal.md) | Set up a standard site, a FIRE project, a multi-domain or multisite project, or search. |
 | [Configuration](docs/configuration.md) | Change worktree names, copied files, the default database or the build command. |
 | [Choosing the branch](docs/branches.md) | Check out an existing branch or a pull request, fetch first, or compare a pull request with its base. |
 | [Choosing the database](docs/databases.md) | Copy, reuse or import a database, or start empty. |

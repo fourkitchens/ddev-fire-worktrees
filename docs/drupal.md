@@ -6,6 +6,7 @@ need one to three [settings](configuration.md) each.
 * [Standard Drupal sites](#standard-drupal-sites)
 * [Projects that build with FIRE](#projects-that-build-with-fire)
 * [Multi-domain and multisite projects](#multi-domain-and-multisite-projects)
+* [Search](#search)
 * [Drupal notes](#drupal-notes)
 
 ## Standard Drupal sites
@@ -80,13 +81,51 @@ In a multisite that runs one site at a time in the `db` database, such as one bu
 worktree to another site with `--db=fresh` and `fire build --site-name=<site>`. In a multisite with
 a database per site, make the build command run `drush deploy` for each site.
 
+## Search
+
+Search servers that run in DDEV, such as Solr, keep their data in volumes that belong to each
+project, so a new worktree's search server starts empty. Its database, copied or imported, still
+marks items as indexed: `ddev drush search-api:status` shows them indexed, searches find nothing,
+and `ddev drush search-api:index` reports the index up to date. Mark every item for reindexing,
+then index:
+
+```bash
+ddev drush search-api:reset-tracker
+ddev drush search-api:index
+```
+
+`ddev drush search-api:clear` works too, and also deletes what the server holds. Search API's
+Database backend keeps its index in the site's database, so a copy already has it.
+
+A new search server has only what its add-on creates when it starts, so a core, collection or index
+you added later is missing. With [`ddev/ddev-solr`](https://github.com/ddev/ddev-solr), commit your
+configset to `.ddev/solr/configsets` and Solr
+[creates its collection](https://github.com/ddev/ddev-solr#create-a-collection) in each worktree. If
+you upload the configset from Drupal instead, upload it in the worktree before indexing:
+
+```bash
+ddev drush --numShards=1 search-api-solr:upload-configset <server>
+```
+
+To reindex after every database copy, add the commands to `WORKTREE_BUILD_COMMAND`. Your setting
+replaces the default build, so start with the build your project uses, such as
+`ddev drush deploy -y` or `ddev site-build --skip-db-import`:
+
+```yaml
+web_environment:
+    - WORKTREE_BUILD_COMMAND=ddev drush deploy -y && ddev drush search-api:reset-tracker && ddev drush search-api:index
+```
+
+Put the `upload-configset` command, if you need it, before `search-api:reset-tracker`. On a large
+site, leave out `search-api:index` and run it when you need search. `search-api:index` exits
+successfully even when indexing fails, so look for `Couldn't index items` in the build's output or
+in `.ddev/fire-worktree-start.log`.
+
 ## Drupal notes
 
 * **Uploaded files.** Worktrees start without `sites/default/files`. Use
   [Stage File Proxy](https://www.drupal.org/project/stage_file_proxy) to fetch them from the remote
   site on demand.
-* **Search.** Solr and other service volumes belong to each project, so indexes start empty.
-  Reindex with `ddev drush search-api:index`.
 * **Branch in the environment indicator.** In a worktree, `.git` is a file that points outside the
   container, so code that reads `../.git/HEAD` must skip the label when that path isn't readable.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
