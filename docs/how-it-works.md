@@ -11,7 +11,8 @@
 4. Runs `ddev composer install` when the project has a `composer.json`.
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints
    the command.
-6. Prints the worktree's URLs.
+6. Prints the worktree's URLs. For a Drupal site with a database, it also prints a one-time login
+   link from `ddev drush uli`.
 
 It's safe to rerun: an existing worktree keeps its project name and data.
 
@@ -28,7 +29,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
   from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
 * **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
-  replaces a worktree's data. See [Choosing the database](databases.md).
+  replaces a worktree's data. Startup notes where the database came from in the worktree's Git
+  directory, as `fire-worktree-db`, for `ddev fire-worktree-info`. See
+  [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.

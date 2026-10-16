@@ -16,7 +16,10 @@ With `type: drupal`, `drupal10` or `drupal11` in `.ddev/config.yaml`, each new w
 * runs `ddev composer install`,
 * runs `ddev drush deploy -y`, which runs database updates, imports configuration, rebuilds caches
   and runs deploy hooks,
-* is served at `https://<prefix>-<directory>-<number>.ddev.site`.
+* is served at `https://<prefix>-<directory>-<number>.ddev.site`,
+* ends startup with a one-time login link to that URL.
+
+`ddev fire-worktree-info` prints a new login link whenever you need one.
 
 Drupal 7 projects get `ddev drush updb -y` instead, because `drush deploy` needs Drupal 8.8 or later.
 
@@ -87,4 +90,14 @@ a database per site, make the build command run `drush deploy` for each site.
 * **Branch in the environment indicator.** In a worktree, `.git` is a file that points outside the
   container, so code that reads `../.git/HEAD` must skip the label when that path isn't readable.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
-  worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead.
+  worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead. Startup warns about
+  `web_environment` values that name your main checkout's hostnames, such as
+  `DRUSH_OPTIONS_URI=https://www.<project>.ddev.site`. DDEV fills in variables in those values, so
+  build them from the project's own name:
+
+  ```yaml
+  web_environment:
+      - DRUSH_OPTIONS_URI=https://www.${DDEV_SITENAME}.${DDEV_TLD}
+  ```
+
+  DDEV already sets `DRUSH_OPTIONS_URI` to `$DDEV_PRIMARY_URL`, so drop a value that only repeats it.
