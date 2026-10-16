@@ -139,6 +139,13 @@ worktree_name() {
   assert_output "2"
   assert_file_not_exists "${WT}/web/built.txt"
 
+  run ddev fire-worktree-info
+  assert_success
+  assert_line "Project:   ${NAME} (running)"
+  assert_line "           https://sub.${NAME}.ddev.site"
+  assert_line --regexp "^Database:  ${PRIMARY}/\.ddev/db_snapshots/fire-worktree-seed-[^ ]+ \(--db=primary\)\$"
+  refute_output --partial "Login"
+
   run ddev fire-worktree-list
   assert_success
   assert_output --partial "main (primary)"
@@ -278,14 +285,55 @@ EOF
 
   run ddev fire-worktree-create legacy/x
   assert_failure
-  assert_output --partial "already exists"
+  assert_output --partial "Branch legacy/x is already checked out in ${LEGACY}."
+}
+
+@test "creates worktrees for a pull request and its base from one database copy" {
+  set -eu -o pipefail
+  install_and_start "${DIR}"
+
+  # A pull request on origin that changes the page.
+  git init -q --bare "${TESTDIR}/origin.git"
+  git remote add origin "${TESTDIR}/origin.git"
+  git push -q origin main
+  git checkout -q -b feature/pr
+  echo '<?php echo "pr";' >web/index.php
+  git commit -qam 'Change the page'
+  git push -q origin feature/pr feature/pr:refs/pull/7/head
+  git checkout -q main
+  git branch -q -D feature/pr
+  # gh's answer for a pull request from this repository.
+  mkdir "${TESTDIR}/bin"
+  cat >"${TESTDIR}/bin/gh" <<'SH'
+#!/bin/sh
+printf 'feature/pr\nmain\nfalse\nfourkitchens\n'
+SH
+  chmod +x "${TESTDIR}/bin/gh"
+
+  PATH="${TESTDIR}/bin:${PATH}"
+  run ddev fire-worktree-create --pr 7 --base
+  assert_success
+  assert_output --partial "Checked out pull request #7 as branch feature/pr in:"
+  # Both seed from the same snapshot.
+  assert_equal "$(printf '%s\n' "${output}" | grep -c '^Seeding the new database from')" 2
+  assert_equal "$(printf '%s\n' "${output}" | grep '^Seeding the new database from' | sort -u | wc -l | tr -d ' ')" 1
+  WT="${TESTDIR}/primary-feature-pr"
+  run curl -sf "http://$(worktree_name "${WT}").ddev.site"
+  assert_output "pr"
+  run curl -sf "http://$(worktree_name "${WT}-base").ddev.site"
+  assert_output "ok"
+  run bash -c "cd '${WT}-base' && ddev mysql -N -e 'SELECT v FROM marker'"
+  assert_output "from-primary"
+  run git -C "${WT}" rev-parse --abbrev-ref '@{upstream}'
+  assert_output "origin/feature/pr"
 }
 
 @test "a standard Drupal site needs no settings: the worktree copies the database and runs drush deploy" {
   set -eu -o pipefail
   # One Drupal site, no extra hostnames and no WORKTREE_* settings, like most projects.
+  # Some pin Drush's URI to the primary site, which every worktree inherits.
   rm -rf web .gitignore
-  printf 'name: %s\ntype: drupal11\ndocroot: web\n' "${PROJNAME}" >.ddev/config.yaml
+  printf 'name: %s\ntype: drupal11\ndocroot: web\nweb_environment:\n  - DRUSH_OPTIONS_URI=https://%s.ddev.site\n' "${PROJNAME}" "${PROJNAME}" >.ddev/config.yaml
   run ddev add-on get "${DIR}"
   assert_success
   run ddev start -y
@@ -314,8 +362,14 @@ EOF
   run ddev fire-worktree-create feature/drupal
   assert_success
   assert_output --partial "Building with: ddev drush deploy -y"
+  assert_output --partial "inherits DRUSH_OPTIONS_URI=https://${PROJNAME}.ddev.site from web_environment"
   WT="${TESTDIR}/primary-feature-drupal"
   NAME=$(worktree_name "${WT}")
+  # The login link is the worktree's, despite DRUSH_OPTIONS_URI, and logs in.
+  assert_line --regexp "^One-time login link: https://${NAME}\.ddev\.site/user/reset/1/"
+  link=$(printf '%s\n' "${output}" | sed -n 's/^One-time login link: https:/http:/p')
+  run curl -s -o /dev/null -w '%{url_effective}' -L "${link}"
+  assert_output --regexp "^http://${NAME}\.ddev\.site/user/1/edit"
   run grep -x 'additional_hostnames: \[\]' "${WT}/.ddev/config.worktree.local.yaml"
   assert_success
 
@@ -329,6 +383,13 @@ EOF
   assert_output --partial "Branch config"
   run git status --porcelain
   assert_output ""
+
+  run ddev fire-worktree-info --json
+  assert_success
+  assert_line "  \"name\": \"${NAME}\","
+  assert_line '  "status": "running",'
+  assert_line --regexp "^  \"database\": \\{\"source\": \"primary\", \"file\": \"${PRIMARY}/\\.ddev/db_snapshots/fire-worktree-seed-[^\"]+\"\\},\$"
+  assert_line --regexp "^  \"login_url\": \"https://${NAME}\\.ddev\\.site/user/reset/1/[^\"]+\"\$"
 
   cd "${PRIMARY}"
   run ddev drush config:get system.site name --format=string

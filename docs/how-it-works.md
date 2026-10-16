@@ -11,7 +11,8 @@
 4. Runs `ddev composer install` when the project has a `composer.json`.
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints
    the command.
-6. Prints the worktree's URLs. If the build failed, it then prints the command to rerun and exits
+6. Prints the worktree's URLs. For a Drupal site with a database, it also prints a one-time login
+   link from `ddev drush uli`. If the build failed, it then prints the command to rerun and exits
    1, or 0 with `WORKTREE_BUILD_FAILURE=warn`.
 
 It's safe to rerun: an existing worktree keeps its project name and data.
@@ -32,7 +33,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.
 * **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
-  replaces a worktree's data. See [Choosing the database](databases.md).
+  replaces a worktree's data. Startup notes where the database came from in the worktree's Git
+  directory, as `fire-worktree-db`, for `ddev fire-worktree-info`. See
+  [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
@@ -42,5 +45,7 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   leftover volumes that match your prefix, since another clone may own them.
 * **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
   they didn't write, or to remove a checkout with uncommitted work. They never delete branches.
+  `create` moves an existing branch only to fast-forward a pull request's branch that tracks the
+  pull request.
 * **Portability.** The commands are Bash 3.2 scripts that read DDEV's YAML themselves, so they need
   no `jq`, `yq` or Python.

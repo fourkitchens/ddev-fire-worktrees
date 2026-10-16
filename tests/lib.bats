@@ -442,3 +442,136 @@ YAML
   assert_line "Configured DDEV project $(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)"
   assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
 }
+
+@test "finds web_environment URLs that point a worktree at the primary site" {
+  cat >"${SITE}/.ddev/config.yaml" <<'YAML'
+name: mysite
+additional_hostnames:
+    - news.mysite
+    - other.example
+web_environment:
+    - DRUSH_OPTIONS_URI=https://mysite.ddev.site
+    - SIMPLETEST_BASE_URL=http://news.mysite.ddev.site:8080/
+    - PARTNER_URL=https://other.example.ddev.site
+    - FIXED_URI=https://www.mysite.ddev.site
+    - PORTABLE_URI=https://www.${DDEV_SITENAME}.${DDEV_TLD}
+    - LOOKALIKES=https://mysite.ddev.site.example https://wt-mysite.ddev.site
+YAML
+  # A developer's override replaces the team's value, as in DDEV.
+  printf 'web_environment: [FIXED_URI=$DDEV_PRIMARY_URL]\n' >"${SITE}/.ddev/config.local.yaml"
+  run fw::primary_url_settings "${SITE}" mysite
+  assert_success
+  assert_output "$(printf '%s\n' DRUSH_OPTIONS_URI=https://mysite.ddev.site SIMPLETEST_BASE_URL=http://news.mysite.ddev.site:8080/ PARTNER_URL=https://other.example.ddev.site)"
+
+  printf 'name: mysite\n' >"${SITE}/.ddev/config.yaml"
+  rm "${SITE}/.ddev/config.local.yaml"
+  run fw::primary_url_settings "${SITE}" mysite
+  assert_success
+  assert_output ""
+}
+
+# drupal_worktree: a Drupal project whose Drush URI names the primary site, and
+# a worktree of it at WT. Starts run without Docker or DDEV; ddev drush uli
+# prints a link to the --uri it gets.
+drupal_worktree() {
+  printf 'name: mysite\ntype: drupal11\nadditional_hostnames: [news.mysite]\nweb_environment:\n  - DRUSH_OPTIONS_URI=https://mysite.ddev.site\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  ddev() {
+    if [[ "$*" == 'drush uli --no-browser --uri='* ]]; then
+      echo "${4#--uri=}/user/reset/1/abc/def/login"
+    fi
+  }
+  docker() { :; }
+}
+
+@test "start ends with a login link to the worktree when the site has a database" {
+  drupal_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_output --partial "Warning: This worktree inherits DRUSH_OPTIONS_URI=https://mysite.ddev.site from web_environment"
+  assert_output --partial "To populate the database"
+  refute_output --partial "login link"
+
+  # On a rerun the database exists.
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  run fw::start_worktree "${WT}" "" false
+  assert_success
+  assert_line --index 0 "Configured DDEV project ${NAME}"
+  assert_output --partial "$(printf 'Worktree URLs:\n  https://%s.ddev.site\n  https://news.%s.ddev.site\n' "${NAME}" "${NAME}")"
+  assert_line "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
+
+  # Drush fails, for example because the site isn't installed.
+  ddev() { [[ "$1" != drush ]]; }
+  run fw::start_worktree "${WT}" "" false
+  assert_success
+  assert_output --partial "Warning: Couldn't create a login link. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+}
+
+@test "records where a worktree's database came from" {
+  drupal_worktree
+  fw::context "${WT}"
+  run fw::db_source
+  assert_output "$(printf 'unknown\t')"
+
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  run fw::db_source
+  assert_output "$(printf 'fresh\t')"
+
+  # A rerun keeps the database, so the record stays.
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  touch "${TESTDIR}/dump.sql.gz"
+  run fw::start_worktree "${WT}" "${TESTDIR}/dump.sql.gz" false
+  assert_success
+  run fw::db_source
+  assert_output "$(printf 'fresh\t')"
+
+  fw::record_db "${TESTDIR}/dump.sql.gz" "${TESTDIR}/dump.sql.gz"
+  run fw::db_source
+  assert_output "$(printf 'dump\t%s' "${TESTDIR}/dump.sql.gz")"
+  fw::record_db primary "${SITE}/.ddev/db_snapshots/fire-worktree-seed-1-mariadb_10.11.gz"
+  run fw::db_source
+  assert_output "$(printf 'primary\t%s' "${SITE}/.ddev/db_snapshots/fire-worktree-seed-1-mariadb_10.11.gz")"
+}
+
+@test "fire-worktree-info describes a worktree as text and JSON" {
+  drupal_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  NAME=$(fw::generated_name "${WT}")
+  INFO="${DIR}/commands/host/fire-worktree-info"
+
+  # The command runs in its own process, so export the stand-ins.
+  docker() { :; }
+  export -f ddev docker
+  cd "${SITE}"
+  run "${INFO}"
+  assert_failure
+  assert_output --partial "is the primary checkout"
+  git -C "${SITE}" worktree add -q -b feature/y "${TESTDIR}/site-feature-y"
+  cd "${TESTDIR}/site-feature-y"
+  run "${INFO}"
+  assert_failure
+  assert_output --partial "Run: ddev fire-worktree-start"
+
+  cd "${WT}/.ddev"
+  run "${INFO}"
+  assert_success
+  assert_output "$(printf 'Project:   %s (not started)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  empty (--db=fresh)\nLogin:     start the project with ddev start, then rerun this command' "${NAME}" "${NAME}" "${NAME}")"
+
+  docker() { [[ "$1" != ps ]] || echo "ddev-${NAME}-web"; }
+  export -f docker
+  export NAME
+  run "${INFO}" --json
+  assert_success
+  assert_output "$(printf '{\n  "name": "%s",\n  "status": "running",\n  "urls": ["https://%s.ddev.site", "https://news.%s.ddev.site"],\n  "database": {"source": "fresh", "file": null},\n  "login_url": "https://%s.ddev.site/user/reset/1/abc/def/login"\n}' "${NAME}" "${NAME}" "${NAME}" "${NAME}")"
+  run "${INFO}" --bogus
+  assert_failure
+  assert_output "Usage: ddev fire-worktree-info [--json]"
+}

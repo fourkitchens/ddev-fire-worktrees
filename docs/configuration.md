@@ -7,7 +7,7 @@ directly, so settings apply before a worktree's DDEV project exists.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `WORKTREE_NAME_PREFIX` | Your project's name, cut to 12 characters | Start of each worktree's DDEV project name and URL. |
-| `WORKTREE_BASE_REF` | Your remote's default branch, else `main` | Start point when `create` gets none. |
+| `WORKTREE_BASE_REF` | Your remote's default branch, else `main` | Start point for a new branch when `create` gets none. With `--fetch`, origin's copy of it. |
 | `WORKTREE_COPY_FILES` | `.ddev/config.local.yaml <docroot>/sites/default/settings.local.php` | Space-separated gitignored files, relative to the project root, copied into a new worktree when missing. |
 | `WORKTREE_DB` | `primary` | Default for `--db`. See [Choosing the database](databases.md). |
 | `WORKTREE_BUILD_COMMAND` | `ddev site-build --skip-db-import` when `ddev-fire` is installed; else `ddev drush deploy -y` for Drupal 8 and later, `ddev drush updb -y` for Drupal 7, and `none` for other project types | Runs in the worktree after a database copy. `none` skips it. |

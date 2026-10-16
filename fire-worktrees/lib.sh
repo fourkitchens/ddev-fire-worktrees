@@ -177,6 +177,20 @@ fw::config_list() {
   done < <(fw::config_files "$1")
 }
 
+# fw::web_environment DIR: DIR's web_environment entries, one NAME=value per
+# line. As in DDEV, a later entry for a NAME replaces an earlier one.
+fw::web_environment() {
+  fw::config_list "$1" web_environment | awk '
+    {
+      i = index($0, "=")
+      if (!i) next
+      name = substr($0, 1, i - 1)
+      if (!(name in entry)) order[++n] = name
+      entry[name] = $0
+    }
+    END { for (j = 1; j <= n; j++) print entry[order[j]] }'
+}
+
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
 # (such as config.local.yaml) overrides an earlier one. Empty means DEFAULT.
 fw::setting() {
@@ -234,6 +248,36 @@ fw::tld() {
   printf '%s' "${tld:-ddev.site}"
 }
 
+# fw::urls DIR NAME: the URLs of DIR's worktree project NAME, main URL first.
+fw::urls() {
+  local tld host
+  tld=$(fw::tld "$1")
+  printf 'https://%s.%s\n' "$2" "$tld"
+  while IFS= read -r host; do
+    if [[ -n "$host" ]]; then
+      printf 'https://%s.%s\n' "$host" "$tld"
+    fi
+  done < <(fw::yaml_list "$1/.ddev/$FW_CONFIG_NAME" additional_hostnames)
+}
+
+# fw::primary_url_settings DIR PRIMARY: DIR's web_environment entries whose value
+# names a hostname of the primary project PRIMARY. A worktree inherits them, so
+# they point it at the primary site.
+fw::primary_url_settings() {
+  local tld host hosts re
+  tld=$(fw::tld "$1")
+  hosts="$2.$tld"
+  while IFS= read -r host; do
+    host=${host#\*.}
+    # The primary name's subdomains already match.
+    if [[ -n "$host" && "$host" != "$2" && "$host" != *".$2" ]]; then
+      hosts="$hosts"$'\n'"$host.$tld"
+    fi
+  done < <(fw::config_list "$1" additional_hostnames)
+  re=$(printf '%s\n' "$hosts" | sed 's/[.]/\\./g' | paste -sd '|' -)
+  fw::web_environment "$1" | grep -E "=(.*[^A-Za-z0-9.-])?([A-Za-z0-9-]+\.)*($re)([^A-Za-z0-9.-]|\$)" || true
+}
+
 # fw::check_hostname HOST: DNS labels can't exceed 63 characters.
 fw::check_hostname() {
   local rest=$1 label
@@ -269,6 +313,23 @@ fw::rewrite_hostnames() {
 # fw::db_volume_exists NAME: true once DDEV has created NAME's database volume.
 fw::db_volume_exists() {
   docker volume ls -q 2>/dev/null | grep -Eq "^$1-(mariadb|mysql|postgres)\$"
+}
+
+# fw::running_containers: the names of running DDEV containers.
+fw::running_containers() {
+  docker ps --filter label=com.ddev.site-name --format '{{.Names}}' 2>/dev/null || true
+}
+
+# fw::status NAME RUNNING: running, stopped or not started, given the
+# fw::running_containers output.
+fw::status() {
+  if printf '%s\n' "$2" | grep -qxF "ddev-$1-web"; then
+    echo running
+  elif fw::db_volume_exists "$1"; then
+    echo stopped
+  else
+    echo 'not started'
+  fi
 }
 
 # fw::compose_project NAME: the Docker Compose project DDEV runs NAME as.
@@ -416,6 +477,32 @@ fw::default_ref() {
   printf '%s' "$ref"
 }
 
+# fw::checked_out_at BRANCH: the worktree that has BRANCH checked out, if any.
+fw::checked_out_at() {
+  git -C "$FW_ROOT" worktree list --porcelain | awk -v ref="branch refs/heads/$1" '
+    index($0, "worktree ") == 1 { path = substr($0, 10) }
+    $0 == ref && !found { print path; found = 1 }'
+}
+
+# fw::pr_info NUMBER: look up pull request NUMBER on origin with gh. Sets
+# FW_PR_HEAD and FW_PR_BASE to its head and base branches, FW_PR_FORK to true
+# when its head branch is in a fork, and FW_PR_OWNER to the head's owner. Fails
+# without gh.
+fw::pr_info() {
+  local url info
+  FW_PR_HEAD=''
+  FW_PR_BASE=''
+  FW_PR_FORK=''
+  FW_PR_OWNER=''
+  command -v gh >/dev/null 2>&1 || return 1
+  url=$(git -C "$FW_ROOT" remote get-url origin) || return 1
+  info=$(gh pr view "$1" --repo "$url" --json headRefName,baseRefName,isCrossRepository,headRepositoryOwner \
+    --jq '.headRefName, .baseRefName, .isCrossRepository, (.headRepositoryOwner.login // "")') || return 1
+  # shellcheck disable=SC2034 # fire-worktree-create reads FW_PR_FORK and FW_PR_OWNER.
+  { IFS= read -r FW_PR_HEAD && IFS= read -r FW_PR_BASE && IFS= read -r FW_PR_FORK && IFS= read -r FW_PR_OWNER; } <<<"$info" || return 1
+  [[ -n "$FW_PR_HEAD" && -n "$FW_PR_BASE" ]]
+}
+
 # fw::seed_snapshot MODE: print the snapshot file to seed a new database from,
 # or nothing for a fresh database.
 fw::seed_snapshot() {
@@ -493,6 +580,34 @@ fw::db_arg() {
   esac
 }
 
+# fw::db_record_file: where startup notes the source of FW_ROOT's database. It
+# lives in the worktree's own Git directory, which Git deletes with the worktree.
+fw::db_record_file() {
+  printf '%s/fire-worktree-db' "$FW_GIT_DIR"
+}
+
+# fw::record_db MODE FILE: note that FW_ROOT's new database comes from --db=MODE,
+# using FILE, the snapshot or dump.
+fw::record_db() {
+  local source=$1
+  case $source in
+    primary | latest | fresh) ;;
+    *) if fw::is_dump "$2"; then source=dump; else source=snapshot; fi ;;
+  esac
+  printf '%s\t%s\n' "$source" "$2" >"$(fw::db_record_file)"
+}
+
+# fw::db_source: FW_ROOT's database source and file, tab-separated. The source
+# is primary, latest, fresh, snapshot, dump, or unknown for a database created
+# before startup recorded it.
+fw::db_source() {
+  local source='' file=''
+  if [[ -f "$(fw::db_record_file)" ]]; then
+    IFS=$'\t' read -r source file <"$(fw::db_record_file)" || true
+  fi
+  printf '%s\t%s' "${source:-unknown}" "$file"
+}
+
 # fw::is_dump FILE: true for a file ddev import-db reads, such as FIRE's
 # reference/site-db.sql.gz, rather than a ddev snapshot.
 fw::is_dump() {
@@ -530,6 +645,36 @@ fw::build_command() {
     fi
   fi
   printf '%s' "$cmd"
+}
+
+# fw::is_drupal DIR: true for DDEV's Drupal project types.
+fw::is_drupal() {
+  [[ "$(fw::config_scalar "$1" type)" == drupal* ]]
+}
+
+# fw::login_link URL: a one-time login link to the Drupal site at URL. Run it in
+# the worktree while its project is running. --uri overrides a DRUSH_OPTIONS_URI
+# the worktree inherited from the primary checkout.
+fw::login_link() {
+  local link
+  link=$(ddev drush uli --no-browser --uri="$1" 2>/dev/null | tr -d '\r' | grep -E '^https?://' | tail -n 1) || true
+  [[ -n "$link" ]] || return 1
+  printf '%s' "$link"
+}
+
+# fw::json TEXT: TEXT as a JSON string, or null when it's empty.
+fw::json() {
+  local s=$1 bs=\\ q=\"
+  if [[ -z "$s" ]]; then
+    printf null
+    return 0
+  fi
+  s=${s//"$bs"/"$bs$bs"}
+  s=${s//"$q"/"$bs$q"}
+  s=${s//$'\t'/"${bs}t"}
+  s=${s//$'\n'/"${bs}n"}
+  s=${s//$'\r'/"${bs}r"}
+  printf '"%s"' "$s"
 }
 
 # fw::populate_hint DIR: how to fill an empty database.
@@ -655,7 +800,7 @@ fw::start_worktree() {
 
 # fw::start_steps DB BUILD: fw::start_worktree's work, in FW_ROOT.
 fw::start_steps() {
-  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' tld host cmd nested=false composer_root new_db=false on_failure build_failed=false
+  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' tld url link item cmd nested=false composer_root new_db=false on_failure build_failed=false
   cfg=".ddev/$FW_CONFIG_NAME"
   legacy=.ddev/config.worktree.yaml
   if [[ (-e "$cfg" || -L "$cfg") ]] && ! fw::is_generated "$cfg"; then
@@ -706,6 +851,10 @@ fw::start_steps() {
   fi
   fw::registry_add "$FW_NAME" "$FW_ROOT" || exit 1
   printf 'Configured DDEV project %s\n' "$FW_NAME"
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    fw::warn "This worktree inherits $item from web_environment, which points it at the primary site. Build the value from \${DDEV_SITENAME}.\${DDEV_TLD} or \$DDEV_PRIMARY_URL instead."
+  done < <(fw::primary_url_settings "$FW_ROOT" "$primary")
 
   if [[ -n "$FW_PRIMARY_ROOT" && "$FW_ROOT" == "$FW_PRIMARY_ROOT"/* ]]; then
     nested=true
@@ -723,6 +872,9 @@ fw::start_steps() {
   if [[ -n "$seed" ]] && fw::is_dump "$seed"; then
     dump=$seed
     seed=
+  fi
+  if [[ "$new_db" == true ]]; then
+    fw::record_db "$db" "${seed:-$dump}"
   fi
   if [[ -n "$seed" ]]; then
     printf 'Seeding the new database from %s\n' "$seed"
@@ -762,12 +914,17 @@ fw::start_steps() {
     fi
   fi
 
-  printf '\nWorktree URLs:\n  https://%s.%s\n' "$FW_NAME" "$tld"
-  while IFS= read -r host; do
-    [[ -n "$host" ]] && printf '  https://%s.%s\n' "$host" "$tld"
-  done < <(fw::yaml_list "$cfg" additional_hostnames)
+  printf '\nWorktree URLs:\n'
+  fw::urls "$FW_ROOT" "$FW_NAME" | sed 's/^/  /'
   if [[ "$new_db" == true && -z "$seed" && -z "$dump" ]]; then
     printf 'To populate the database: %s\n' "$(fw::populate_hint "$FW_ROOT")"
+  elif fw::is_drupal "$FW_ROOT"; then
+    url="https://$FW_NAME.$tld"
+    if link=$(fw::login_link "$url"); then
+      printf 'One-time login link: %s\n' "$link"
+    else
+      fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+    fi
   fi
   if [[ "$build_failed" == true ]]; then
     if [[ "$on_failure" == warn ]]; then

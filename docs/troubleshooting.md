@@ -2,6 +2,11 @@
 
 | Message or symptom | What to do |
 | --- | --- |
+| `Branch <name> is already checked out in <path>` | That worktree, or your main checkout, already has the branch. Work there instead, and run `ddev fire-worktree-start` in it if it has no site yet. |
+| `Branch <name> is checked out in <path>, which no longer exists` | A tool deleted the worktree's directory without telling Git. Run `git worktree prune`, then `ddev fire-worktree-prune` to delete its DDEV project. |
+| `Branch <name> already exists and doesn't have pull request #<n>'s latest commit` | Your branch has diverged from the pull request, for example after a force-push. Pass another branch name, `ddev fire-worktree-create --pr=<n> review-<n>`, or delete the old branch. |
+| `Couldn't fetch pull request <n> from origin` | origin has no pull request with that number. `--pr` needs origin to be the GitHub repository the pull request is in. |
+| `Couldn't look up pull request <n> with gh` | Sign in with `gh auth login`. Until then the branch is named `pr-<n>`, and `--base` doesn't work. |
 | `Couldn't snapshot <project>` | Startup used the last worktree copy instead, or the newest other snapshot if there's none. Start your main checkout with `ddev start`, or use `--db=fresh` or a SQL dump. |
 | `No earlier worktree copy to reuse` | `--db=latest` found no `fire-worktree-seed-*` snapshot, so it used the newest other snapshot it names. If that's the wrong data, run `ddev delete --omit-snapshot --yes` in the worktree, then `ddev fire-worktree-start --db=primary`. |
 | An agent tool says only that its setup script failed | Read `.ddev/fire-worktree-start.log` in the worktree. Each start adds its output there. |
@@ -10,6 +15,8 @@
 | `The worktree is running, but the import failed` | The site is up, but its database is empty or partly imported. Fix the dump, then run the `ddev import-db` command it prints. |
 | `Waiting for another worktree to finish starting` | Another worktree is running `ddev start`. A lock left by a crashed run is cleared automatically. |
 | `Timed out waiting for .../fire-worktrees.lock` | A fire-worktree command has held the registry lock for 30 seconds. If none is running, delete the lock directory it names. |
+| `This worktree inherits <NAME>=<url> from web_environment` | That value names your main checkout's site, so the worktree uses it too. Build it from `${DDEV_SITENAME}.${DDEV_TLD}` or `$DDEV_PRIMARY_URL`. See [Drupal notes](drupal.md#drupal-notes). |
+| `Couldn't create a login link` | `ddev drush uli` failed, for example because Drupal isn't installed in the worktree's database. Run the command it prints to see the error. |
 | `has a label longer than 63 characters` | Shorten `WORKTREE_NAME_PREFIX` or the worktree's directory name. |
 | `Refusing to overwrite .ddev/config.worktree.local.yaml` | You or another tool wrote that file. Move its settings to `config.local.yaml` and delete it. |
 | `Refusing to remove ...; commit, stash or discard these changes first` | Commit, stash or delete the listed files, or use `--keep-checkout` to delete only the DDEV project. |
