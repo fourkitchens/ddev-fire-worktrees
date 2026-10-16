@@ -8,7 +8,7 @@ A new worktree copies your main checkout's database by default. `create` and `st
 | --- | --- |
 | `primary` | A new snapshot of your main checkout's DDEV database. DDEV starts that project for the snapshot if it's stopped. |
 | `latest` | The newest snapshot in your main checkout's `.ddev/db_snapshots`, without taking a new one. Faster when you create several worktrees in a row. |
-| `fresh` | An empty database. Fill it with `fire build`, `ddev fire-build`, `ddev pull <provider>` or `ddev import-db`. |
+| `fresh` | An empty database. Fill it with `fire build`, `ddev site-build`, `ddev pull <provider>` or `ddev import-db`. |
 | A snapshot file | That `ddev snapshot` file. |
 | A SQL dump | Imported with `ddev import-db`. Accepts `.sql`, `.sql.gz`, `.sql.bz2`, `.sql.xz`, `.mysql`, `.mysql.gz`, `.zip`, `.tgz` and `.tar.gz`, for example FIRE's `reference/site-db.sql.gz`. |
 
