@@ -1,6 +1,6 @@
 # Choosing the database
 
-A new worktree copies your main checkout's database by default. `create` and `start` take
+A new worktree copies your main checkout's database by default. `create`, `start` and `refresh` take
 `--db=<source>` to choose another source, and `--no-build` to skip the build after the copy. Without
 `--db`, they use [`WORKTREE_DB`](configuration.md), else `primary`.
 
@@ -25,16 +25,23 @@ A path is read from the directory you run the command in.
 
 ## When the database is copied
 
-The database is copied only when the worktree has none yet, so reruns of `ddev fire-worktree-start`
-keep its data. To get a new copy, run these in the worktree:
+Startup copies the database only when the worktree has none yet, so reruns of
+`ddev fire-worktree-start` keep its data. After a copy, it runs `WORKTREE_BUILD_COMMAND` so the copy
+matches the branch's code and configuration. With `--no-build`, it prints the command instead.
+
+A worktree that lives for days falls behind your main checkout. To replace its database with a new
+copy, run this in the worktree:
 
 ```bash
-ddev delete --omit-snapshot --yes
-ddev fire-worktree-start
+ddev fire-worktree-refresh                                    # a new copy of your main checkout
+ddev fire-worktree-refresh --db=latest                        # the last copy a worktree took
+ddev fire-worktree-refresh --db=reference/site-db.sql.gz      # import a dump
 ```
 
-After a copy, startup runs `WORKTREE_BUILD_COMMAND` so the copy matches the branch's code and
-configuration. With `--no-build`, it prints the command instead.
+`refresh` copies and builds the same way as a first start. It keeps the worktree's DDEV project and
+its other volumes, such as search indexes, which `ddev delete` would remove. It doesn't keep the old
+database, so it asks first; run `ddev snapshot` before it to keep a copy, and pass `--yes` when no
+one is at the terminal. `ddev fire-worktree-info` shows when the database was created.
 
 ## Snapshots and dumps
 

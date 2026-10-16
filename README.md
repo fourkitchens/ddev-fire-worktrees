@@ -21,6 +21,7 @@ ddev fire-worktree-create ABC-123-hero   # new branch and checkout, its own site
 ddev fire-worktree-create --pr=123       # a pull request's branch, to review it in its own site
 ddev fire-worktree-list                  # every worktree, its status and URL
 ddev fire-worktree-info                  # in a worktree: its URLs, database source and a login link
+ddev fire-worktree-refresh               # in a worktree: a new copy of your database
 ddev fire-worktree-remove                # in a worktree: delete its site and checkout, keep the branch
 ```
 
@@ -50,14 +51,16 @@ which this add-on provides as an alias.
 | --- | --- | --- |
 | `ddev fire-worktree-create <branch> [start-point]` | `worktree-create` | Checks out a new or existing branch in a directory beside your main checkout, such as `../mysite-abc-123-hero`, then runs startup there. `--pr=<number>` checks out a pull request instead. |
 | `ddev fire-worktree-start` | `worktree-start` | Gives the worktree you're in its own DDEV project, copies the database into it, and builds it. Safe to rerun. |
+| `ddev fire-worktree-refresh [--yes]` | | Replaces the worktree's database with a new copy, as its first start did, and builds it again. Keeps its DDEV project and other volumes, such as search indexes. |
 | `ddev fire-worktree-list` | | Lists every worktree with its branch, DDEV project, status, uncommitted changes and URL. |
-| `ddev fire-worktree-info [--json]` | | Shows the worktree's DDEV project, status, URLs and database source, and for a running Drupal site, a one-time login link. `--json` is for scripts and agents. |
+| `ddev fire-worktree-info [--json]` | | Shows the worktree's DDEV project, status, URLs, and where and when its database was copied, and for a running Drupal site, a one-time login link. `--json` is for scripts and agents. |
 | `ddev fire-worktree-remove [--yes] [--keep-checkout] [path]` | `worktree-remove` | Deletes the worktree's DDEV project and database, then removes the checkout. Keeps the branch. |
 | `ddev fire-worktree-prune [--yes]` | | Finds DDEV projects whose checkout is gone, for example after a tool deletes a worktree. Deletes them with `--yes`. |
 
-Run `create`, `list` and `prune` from any checkout of the repository. Run `start` and `info` inside
-a worktree; `start` appends its output to the worktree's `.ddev/fire-worktree-start.log`. Run
-`remove` inside a worktree, or pass its path. Every command accepts `--help`.
+Run `create`, `list` and `prune` from any checkout of the repository. Run `start`, `refresh` and
+`info` inside a worktree; `start` appends its output to the worktree's
+`.ddev/fire-worktree-start.log`. Run `remove` inside a worktree, or pass its path. Every command
+accepts `--help`.
 
 `create` checks out a branch you or origin already have, and starts a new one from
 `WORKTREE_BASE_REF`, else your remote's default branch. It uses branches as they stand locally; add
@@ -65,11 +68,12 @@ a worktree; `start` appends its output to the worktree's `.ddev/fire-worktree-st
 its base branch to compare against. See [Choosing the branch](docs/branches.md).
 
 `create` and `start` copy your main checkout's database by default. Pass `--db=fresh` for an empty
-database, `--db=<file>` for a snapshot or SQL dump, or `--no-build` to skip the build. See
-[Choosing the database](docs/databases.md).
+database, `--db=<file>` for a snapshot or SQL dump, or `--no-build` to skip the build. A worktree's
+database is copied once; when it falls behind, `refresh` replaces it with a new copy and takes the
+same options. See [Choosing the database](docs/databases.md).
 
-`remove` refuses the main checkout and a worktree with uncommitted or untracked files. It asks before
-deleting anything; pass `--yes` when no one is at the terminal.
+`remove` refuses the main checkout and a worktree with uncommitted or untracked files. `remove` and
+`refresh` ask before deleting anything; pass `--yes` when no one is at the terminal.
 
 ## Documentation
 
@@ -78,7 +82,7 @@ deleting anything; pass `--yes` when no one is at the terminal.
 | [Drupal projects](docs/drupal.md) | Set up a standard site, a FIRE project, a multi-domain or multisite project, or search. |
 | [Configuration](docs/configuration.md) | Change worktree names, copied files, the default database or the build command. |
 | [Choosing the branch](docs/branches.md) | Check out an existing branch or a pull request, fetch first, or compare a pull request with its base. |
-| [Choosing the database](docs/databases.md) | Copy, reuse or import a database, or start empty. |
+| [Choosing the database](docs/databases.md) | Copy, reuse or import a database, start empty, or get a new copy later. |
 | [Lando projects](docs/lando.md) | Use worktrees in a project that also has, or only has, a `.lando.yml`. |
 | [T3 and other agent tools](docs/agent-tools.md) | Start worktrees from T3, Claude Code and similar tools, find out why a start failed, and clean up after them. |
 | [Migrating from project-local commands](docs/migrating.md) | Replace a project's own `worktree-*` commands and keep existing worktrees. |

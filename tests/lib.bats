@@ -668,18 +668,197 @@ drupal_worktree() {
   assert_failure
   assert_output --partial "Run: ddev fire-worktree-start"
 
+  # The record's modification time is when the database was created. Show it in
+  # local time, five hours behind UTC, and in UTC for JSON.
+  export TZ=EST5
+  touch -t 202610010930 "${SITE}/.git/worktrees/site-feature-x/fire-worktree-db"
   cd "${WT}/.ddev"
   run "${INFO}"
   assert_success
-  assert_output "$(printf 'Project:   %s (not started)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  empty (--db=fresh)\nLogin:     start the project with ddev start, then rerun this command' "${NAME}" "${NAME}" "${NAME}")"
+  assert_output "$(printf 'Project:   %s (not started)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  empty (--db=fresh)\n           created 2026-10-01 09:30\nLogin:     start the project with ddev start, then rerun this command' "${NAME}" "${NAME}" "${NAME}")"
 
   docker() { [[ "$1" != ps ]] || echo "ddev-${NAME}-web"; }
   export -f docker
   export NAME
   run "${INFO}" --json
   assert_success
-  assert_output "$(printf '{\n  "name": "%s",\n  "status": "running",\n  "urls": ["https://%s.ddev.site", "https://news.%s.ddev.site"],\n  "database": {"source": "fresh", "file": null},\n  "login_url": "https://%s.ddev.site/user/reset/1/abc/def/login"\n}' "${NAME}" "${NAME}" "${NAME}" "${NAME}")"
+  assert_output "$(printf '{\n  "name": "%s",\n  "status": "running",\n  "urls": ["https://%s.ddev.site", "https://news.%s.ddev.site"],\n  "database": {"source": "fresh", "file": null, "created": "2026-10-01T14:30:00Z"},\n  "login_url": "https://%s.ddev.site/user/reset/1/abc/def/login"\n}' "${NAME}" "${NAME}" "${NAME}" "${NAME}")"
   run "${INFO}" --bogus
   assert_failure
   assert_output "Usage: ddev fire-worktree-info [--json]"
+}
+
+# started_worktree: drupal_worktree after its first start, with stand-ins from
+# with_database.
+started_worktree() {
+  drupal_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  with_database
+}
+
+# with_database: stand-ins for WT's started project NAME and its database
+# volume. ddev logs each call to DDEV_LOG, also from child processes such as the
+# build, and drush uli prints a link to the --uri it gets.
+with_database() {
+  NAME=$(fw::generated_name "${WT}")
+  DDEV_LOG="${TESTDIR}/ddev.log"
+  : >"${DDEV_LOG}"
+  ddev() {
+    echo "$*" >>"${DDEV_LOG}"
+    if [[ "$*" == 'drush uli --no-browser --uri='* ]]; then
+      echo "${4#--uri=}/user/reset/1/abc/def/login"
+    fi
+  }
+  docker() { [[ "$1" != volume ]] || echo "${NAME}-mariadb"; }
+  export -f ddev docker
+  export DDEV_LOG NAME
+}
+
+@test "refresh refuses the primary checkout, a worktree without its own database, and a run without --yes" {
+  drupal_worktree
+  run fw::refresh_worktree "${SITE}" "" true true
+  assert_failure
+  assert_output --partial "not the primary checkout"
+
+  # Before its first start, DDEV gives the worktree the primary project's name.
+  run fw::refresh_worktree "${WT}" "" true true
+  assert_failure
+  assert_output "This worktree has no database of its own yet. Run: ddev fire-worktree-start"
+
+  # Started, but its database volume is gone.
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  run fw::refresh_worktree "${WT}" "" true true
+  assert_failure
+  assert_output "This worktree has no database of its own yet. Run: ddev fire-worktree-start"
+
+  # No one at the terminal to confirm.
+  with_database
+  run fw::refresh_worktree "${WT}" fresh true false </dev/null
+  assert_failure
+  assert_output --partial "  - Delete the database of DDEV project ${NAME}. To keep a copy, cancel and run ddev snapshot."
+  assert_output --partial "Pass --yes to confirm when not running interactively."
+  run cat "${DDEV_LOG}"
+  assert_output ""
+
+  # A generated config that names the primary project.
+  printf '%s\nname: mysite\n' "${FW_MARKER}" >"${WT}/.ddev/config.worktree.local.yaml"
+  docker() { echo mysite-mariadb; }
+  run fw::refresh_worktree "${WT}" fresh true true
+  assert_failure
+  assert_output "Refusing to replace the database of the primary DDEV project mysite."
+}
+
+@test "refresh resets the worktree's database by project name, records its source and builds" {
+  started_worktree
+  SEED="${SITE}/.ddev/db_snapshots/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+  mkdir -p "$(dirname "${SEED}")"
+  touch "${SEED}"
+  RECORD="${SITE}/.git/worktrees/site-feature-x/fire-worktree-db"
+  touch -t 202601010000 "${RECORD}"
+
+  run fw::refresh_worktree "${WT}/.ddev" latest true true
+  assert_success
+  assert_line "  - Replace it with the last copy a worktree took of the mysite database. Other volumes, such as search indexes, are kept."
+  assert_line "  - Run ddev drush deploy -y."
+  assert_line "Seeding the new database from ${SEED}"
+  assert_line "Building with: ddev drush deploy -y"
+  assert_line "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
+  run cat "${DDEV_LOG}"
+  assert_output "$(printf '%s\n' \
+    "start --reset-database --omit-snapshot --skip-confirmation --seed-snapshot=${SEED} ${NAME}" \
+    'drush deploy -y' \
+    "drush uli --no-browser --uri=https://${NAME}.ddev.site")"
+  fw::context "${WT}"
+  run fw::db_source
+  assert_output "$(printf 'latest\t%s' "${SEED}")"
+  # The record is new, so it dates the new database.
+  run fw::db_created +%Y%m%d%H%M
+  refute_output 202601010000
+
+  # A SQL dump is imported once the database is reset. Without the build, it's printed.
+  touch "${TESTDIR}/site-db.sql.gz"
+  : >"${DDEV_LOG}"
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" false true
+  assert_success
+  refute_line --partial "  - Run "
+  assert_line "Importing ${TESTDIR}/site-db.sql.gz into the new database"
+  assert_line "Skipped the build. To run it: ddev drush deploy -y"
+  run cat "${DDEV_LOG}"
+  assert_line --index 0 "start --reset-database --omit-snapshot --skip-confirmation ${NAME}"
+  assert_line --index 1 "import-db --file=${TESTDIR}/site-db.sql.gz"
+  run fw::db_source
+  assert_output "$(printf 'dump\t%s' "${TESTDIR}/site-db.sql.gz")"
+
+  # An empty database isn't built.
+  : >"${DDEV_LOG}"
+  run fw::refresh_worktree "${WT}" fresh true true
+  assert_success
+  assert_line "  - Replace it with an empty database. Other volumes, such as search indexes, are kept."
+  assert_line "To populate the database: ddev import-db --file=<dump>, or ddev pull <provider>"
+  run cat "${DDEV_LOG}"
+  assert_output "start --reset-database --omit-snapshot --skip-confirmation ${NAME}"
+}
+
+@test "refresh says how to recover when ddev start fails, and releases the start lock" {
+  started_worktree
+  ddev() { [[ "$1" != start ]]; }
+  run fw::refresh_worktree "${WT}" fresh true true
+  assert_failure
+  assert_line "ddev start failed, and the worktree's database may be empty. Fix the error, then run: ddev fire-worktree-refresh --db=fresh"
+  [ ! -e "${FW_LOCK}" ]
+}
+
+@test "fire-worktree-refresh parses its options" {
+  started_worktree
+  REFRESH="${DIR}/commands/host/fire-worktree-refresh"
+  cd "${WT}"
+  run "${REFRESH}" --bogus
+  assert_failure
+  assert_output "Usage: ddev fire-worktree-refresh [--db=primary|latest|fresh|<snapshot or dump>] [--no-build] [--yes]"
+  run "${REFRESH}" --db=missing.sql.gz --yes
+  assert_failure
+  assert_output --partial "--db must be primary, latest, fresh"
+  run "${REFRESH}" --db fresh --no-build -y
+  assert_success
+  run cat "${DDEV_LOG}"
+  assert_output "start --reset-database --omit-snapshot --skip-confirmation ${NAME}"
+}
+
+@test "refresh follows WORKTREE_BUILD_FAILURE after printing the URLs" {
+  started_worktree
+  printf 'web_environment:\n  - WORKTREE_BUILD_COMMAND=echo deploy-error && false\n' >"${WT}/.ddev/config.local.yaml"
+  touch "${TESTDIR}/site-db.sql.gz"
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true true
+  assert_failure
+  local n=${#lines[@]}
+  assert_equal "${lines[n-2]}" "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
+  assert_equal "${lines[n-1]}" "The worktree is running, but the build failed. Fix the error, then run: echo deploy-error && false"
+
+  # warn exits 0. Refresh doesn't write the start log, so it names none.
+  printf '  - WORKTREE_BUILD_FAILURE=warn\n' >>"${WT}/.ddev/config.local.yaml"
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true true
+  assert_success
+  assert_line "Warning: The worktree is running, but the build failed. Fix the error, then run: echo deploy-error && false"
+  refute_line --partial "Startup log"
+
+  # A bad value stops before anything is deleted.
+  printf '  - WORKTREE_BUILD_FAILURE=ignore\n' >>"${WT}/.ddev/config.local.yaml"
+  : >"${DDEV_LOG}"
+  run fw::refresh_worktree "${WT}" fresh true true
+  assert_failure
+  assert_output "WORKTREE_BUILD_FAILURE must be fail or warn; got ignore."
+  run cat "${DDEV_LOG}"
+  assert_output ""
+}
+
+@test "refresh keeps the database when there's no snapshot to copy" {
+  started_worktree
+  run fw::refresh_worktree "${WT}" latest true true
+  assert_failure
+  assert_output --partial "The primary checkout has no database snapshot to copy."
+  run cat "${DDEV_LOG}"
+  assert_output ""
+  [ ! -e "${FW_LOCK}" ]
 }

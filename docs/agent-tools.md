@@ -12,21 +12,24 @@ its own container.
 
 For a Drupal site, startup ends with a one-time login link to the worktree. Later, run
 `ddev fire-worktree-info --json` in the worktree for its project name, status, URLs, database source
-and a new login link:
+and age, and a new login link:
 
 ```json
 {
   "name": "mysite-abc-123-hero-1234567890",
   "status": "running",
   "urls": ["https://mysite-abc-123-hero-1234567890.ddev.site"],
-  "database": {"source": "primary", "file": "/path/to/mysite/.ddev/db_snapshots/fire-worktree-seed-20261016093000-mariadb_10.11.gz"},
+  "database": {"source": "primary", "file": "/path/to/mysite/.ddev/db_snapshots/fire-worktree-seed-20261016093000-mariadb_10.11.gz", "created": "2026-10-16T14:30:05Z"},
   "login_url": "https://mysite-abc-123-hero-1234567890.ddev.site/user/reset/1/1760610000/abc/login"
 }
 ```
 
-`database.source` is the `--db` the worktree started with: `primary`, `latest`, `fresh`, `snapshot`
-or `dump`, or `unknown` for a worktree started before this was recorded. `login_url` is `null` when
-the project isn't running or isn't Drupal.
+`database.source` is the `--db` the database came from: `primary`, `latest`, `fresh`, `snapshot` or
+`dump`, or `unknown` for a worktree started before this was recorded. `database.created` is when
+startup or the last refresh created the database, in UTC, or `null` when that's unknown. `login_url`
+is `null` when the project isn't running or isn't Drupal.
+
+To give a worktree a new copy of the database, run `ddev fire-worktree-refresh --yes` in it.
 
 ## When startup fails
 
