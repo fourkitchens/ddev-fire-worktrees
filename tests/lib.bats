@@ -218,6 +218,13 @@ snapshot_dirs() {
   assert_output "abcdefghijk"
 }
 
+@test "names the Compose project whose label marks a project's volumes" {
+  run fw::compose_project "fwtest-feature-one-123"
+  assert_output "ddev-fwtest-feature-one-123"
+  run fw::compose_project "My.Site"
+  assert_output "ddev-mysite"
+}
+
 @test "resolves a --db file from the caller's directory" {
   mkdir -p "${TESTDIR}/here/reference"
   touch "${TESTDIR}/here/reference/site-db.sql.gz"

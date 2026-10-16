@@ -56,7 +56,7 @@ if [[ -n "$name" && "$name" == "$primary" ]]; then
   fw::die "Refusing to delete the primary DDEV project $primary."
 fi
 has_project=false
-if [[ -n "$name" ]] && { ddev describe "$name" >/dev/null 2>&1 || fw::db_volume_exists "$name"; }; then
+if [[ -n "$name" ]] && fw::has_environment "$name"; then
   has_project=true
 fi
 
@@ -71,7 +71,7 @@ branch=$(git -C "$FW_ROOT" symbolic-ref --quiet --short HEAD || true)
 
 echo 'This will:'
 if [[ "$has_project" == true ]]; then
-  echo "  - Delete DDEV project $name, including its database."
+  echo "  - Delete DDEV project $name, including its database and volumes."
 else
   echo '  - Skip DDEV: this worktree has no environment from fire-worktree-start.'
 fi
@@ -89,7 +89,7 @@ if [[ "$yes" == false ]]; then
 fi
 
 if [[ "$has_project" == true ]]; then
-  ddev delete --omit-snapshot --yes "$name"
+  fw::delete_project "$name"
 fi
 if [[ -n "$name" ]]; then
   fw::registry_remove "$name"
