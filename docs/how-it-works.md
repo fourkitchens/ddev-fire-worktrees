@@ -38,5 +38,7 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   leftover volumes that match your prefix, since another clone may own them.
 * **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
   they didn't write, or to remove a checkout with uncommitted work. They never delete branches.
+  `create` moves an existing branch only to fast-forward a pull request's branch that tracks the
+  pull request.
 * **Portability.** The commands are Bash 3.2 scripts that read DDEV's YAML themselves, so they need
   no `jq`, `yq` or Python.

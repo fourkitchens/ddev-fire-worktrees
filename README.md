@@ -18,6 +18,7 @@ but neither add-on needs the other.
 
 ```bash
 ddev fire-worktree-create ABC-123-hero   # new branch and checkout, its own site, a copy of your database
+ddev fire-worktree-create --pr=123       # a pull request's branch, to review it in its own site
 ddev fire-worktree-list                  # every worktree, its status and URL
 ddev fire-worktree-remove                # in a worktree: delete its site and checkout, keep the branch
 ```
@@ -46,7 +47,7 @@ which this add-on provides as an alias.
 
 | Command | Alias | What it does |
 | --- | --- | --- |
-| `ddev fire-worktree-create <branch> [start-point]` | `worktree-create` | Creates the branch in a directory beside your main checkout, such as `../mysite-abc-123-hero`, then runs startup there. |
+| `ddev fire-worktree-create <branch> [start-point]` | `worktree-create` | Checks out a new or existing branch in a directory beside your main checkout, such as `../mysite-abc-123-hero`, then runs startup there. `--pr=<number>` checks out a pull request instead. |
 | `ddev fire-worktree-start` | `worktree-start` | Gives the worktree you're in its own DDEV project, copies the database into it, and builds it. Safe to rerun. |
 | `ddev fire-worktree-list` | | Lists every worktree with its branch, DDEV project, status, uncommitted changes and URL. |
 | `ddev fire-worktree-remove [--yes] [--keep-checkout] [path]` | `worktree-remove` | Deletes the worktree's DDEV project and database, then removes the checkout. Keeps the branch. |
@@ -55,8 +56,10 @@ which this add-on provides as an alias.
 Run `create`, `list` and `prune` from any checkout of the repository. Run `start` inside a worktree.
 Run `remove` inside a worktree, or pass its path. Every command accepts `--help`.
 
-`create` starts from `WORKTREE_BASE_REF`, else your remote's default branch, as it stands locally.
-Fetch first to start from the newest commit. `create` refuses a branch or directory that already exists.
+`create` checks out a branch you or origin already have, and starts a new one from
+`WORKTREE_BASE_REF`, else your remote's default branch. It uses branches as they stand locally; add
+`--fetch` to fetch first. `--pr=<number>` checks out a pull request, and `--base` adds a worktree on
+its base branch to compare against. See [Choosing the branch](docs/branches.md).
 
 `create` and `start` copy your main checkout's database by default. Pass `--db=fresh` for an empty
 database, `--db=<file>` for a snapshot or SQL dump, or `--no-build` to skip the build. See
@@ -71,6 +74,7 @@ deleting anything; pass `--yes` when no one is at the terminal.
 | --- | --- |
 | [Drupal projects](docs/drupal.md) | Set up a standard site, a FIRE project, or a multi-domain or multisite project. |
 | [Configuration](docs/configuration.md) | Change worktree names, copied files, the default database or the build command. |
+| [Choosing the branch](docs/branches.md) | Check out an existing branch or a pull request, fetch first, or compare a pull request with its base. |
 | [Choosing the database](docs/databases.md) | Copy, reuse or import a database, or start empty. |
 | [Lando projects](docs/lando.md) | Use worktrees in a project that also has, or only has, a `.lando.yml`. |
 | [T3 and other agent tools](docs/agent-tools.md) | Start worktrees from T3, Claude Code and similar tools, and clean up after them. |

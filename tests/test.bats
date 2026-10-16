@@ -263,7 +263,47 @@ EOF
 
   run ddev fire-worktree-create legacy/x
   assert_failure
-  assert_output --partial "already exists"
+  assert_output --partial "Branch legacy/x is already checked out in ${LEGACY}."
+}
+
+@test "creates worktrees for a pull request and its base from one database copy" {
+  set -eu -o pipefail
+  install_and_start "${DIR}"
+
+  # A pull request on origin that changes the page.
+  git init -q --bare "${TESTDIR}/origin.git"
+  git remote add origin "${TESTDIR}/origin.git"
+  git push -q origin main
+  git checkout -q -b feature/pr
+  echo '<?php echo "pr";' >web/index.php
+  git commit -qam 'Change the page'
+  git push -q origin feature/pr feature/pr:refs/pull/7/head
+  git checkout -q main
+  git branch -q -D feature/pr
+  # gh's answer for a pull request from this repository.
+  mkdir "${TESTDIR}/bin"
+  cat >"${TESTDIR}/bin/gh" <<'SH'
+#!/bin/sh
+printf 'feature/pr\nmain\nfalse\nfourkitchens\n'
+SH
+  chmod +x "${TESTDIR}/bin/gh"
+
+  PATH="${TESTDIR}/bin:${PATH}"
+  run ddev fire-worktree-create --pr 7 --base
+  assert_success
+  assert_output --partial "Checked out pull request #7 as branch feature/pr in:"
+  # Both seed from the same snapshot.
+  assert_equal "$(printf '%s\n' "${output}" | grep -c '^Seeding the new database from')" 2
+  assert_equal "$(printf '%s\n' "${output}" | grep '^Seeding the new database from' | sort -u | wc -l | tr -d ' ')" 1
+  WT="${TESTDIR}/primary-feature-pr"
+  run curl -sf "http://$(worktree_name "${WT}").ddev.site"
+  assert_output "pr"
+  run curl -sf "http://$(worktree_name "${WT}-base").ddev.site"
+  assert_output "ok"
+  run bash -c "cd '${WT}-base' && ddev mysql -N -e 'SELECT v FROM marker'"
+  assert_output "from-primary"
+  run git -C "${WT}" rev-parse --abbrev-ref '@{upstream}'
+  assert_output "origin/feature/pr"
 }
 
 @test "a standard Drupal site needs no settings: the worktree copies the database and runs drush deploy" {
