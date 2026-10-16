@@ -11,7 +11,8 @@
 4. Runs `ddev composer install` when the project has a `composer.json`.
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints
    the command.
-6. Prints the worktree's URLs.
+6. Prints the worktree's URLs. If the build failed, it then prints the command to rerun and exits
+   1, or 0 with `WORKTREE_BUILD_FAILURE=warn`.
 
 It's safe to rerun: an existing worktree keeps its project name and data.
 
@@ -27,6 +28,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
 * **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
   from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
+* **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
+  line with the date, and prints the log's path when it fails. Startup adds the log to
+  `.git/info/exclude`, and `remove` deletes it with the checkout.
 * **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
   replaces a worktree's data. See [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.

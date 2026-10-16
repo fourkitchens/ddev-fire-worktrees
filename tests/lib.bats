@@ -355,4 +355,90 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output "$(printf '%s\n' "${TESTDIR}"/site-feature-{1,2,3,4} | sort)"
   run grep -cxF "/.ddev/${FW_CONFIG_NAME}" "${SITE}/.git/info/exclude"
   assert_output 1
+  run grep -cxF "/.ddev/${FW_LOG_NAME}" "${SITE}/.git/info/exclude"
+  assert_output 1
+}
+
+@test "reads WORKTREE_BUILD_FAILURE" {
+  printf 'type: php
+' >"${SITE}/.ddev/config.yaml"
+  run fw::build_failure "${SITE}"
+  assert_output "fail"
+  printf 'web_environment: [WORKTREE_BUILD_FAILURE=warn]\n' >"${SITE}/.ddev/config.local.yaml"
+  run fw::build_failure "${SITE}"
+  assert_output "warn"
+  printf 'web_environment: [WORKTREE_BUILD_FAILURE=ignore]\n' >"${SITE}/.ddev/config.local.yaml"
+  run fw::build_failure "${SITE}"
+  assert_failure
+  assert_output "WORKTREE_BUILD_FAILURE must be fail or warn; got ignore."
+}
+
+@test "a failed build prints the URLs and the log, and warn exits 0" {
+  cat >"${SITE}/.ddev/config.yaml" <<'YAML'
+name: mysite
+type: php
+web_environment:
+    - WORKTREE_BUILD_COMMAND=echo deploy-error && false
+YAML
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  LOG="${WT}/.ddev/${FW_LOG_NAME}"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  # A dump, so every start imports it and builds.
+  touch "${TESTDIR}/site-db.sql.gz"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_failure
+  NAME=$(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)
+  local n=${#lines[@]}
+  assert_equal "${lines[n-4]}" "Worktree URLs:"
+  assert_equal "${lines[n-3]}" "  https://${NAME}.ddev.site"
+  assert_equal "${lines[n-2]}" "The worktree is running, but the build failed. Fix the error, then run: echo deploy-error && false"
+  assert_equal "${lines[n-1]}" "Startup log: ${LOG}"
+  run cat "${LOG}"
+  assert_line --index 0 --regexp '^=== [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}: fire-worktree-start$'
+  assert_line "deploy-error"
+  assert_line "The worktree is running, but the build failed. Fix the error, then run: echo deploy-error && false"
+  run git -C "${WT}" status --porcelain
+  assert_output ""
+
+  printf 'web_environment: [WORKTREE_BUILD_FAILURE=warn]\n' >"${WT}/.ddev/config.local.yaml"
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  n=${#lines[@]}
+  assert_equal "${lines[n-3]}" "  https://${NAME}.ddev.site"
+  assert_equal "${lines[n-2]}" "Warning: The worktree is running, but the build failed. Fix the error, then run: echo deploy-error && false"
+  assert_equal "${lines[n-1]}" "Startup log: ${LOG}"
+  # Each start adds to the log, so a rerun keeps the failure it follows.
+  run grep -c '^=== ' "${LOG}"
+  assert_output 2
+}
+
+@test "startup stops at the first error and points to the log" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+
+  # Run the command itself, which sets -e, without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  export -f ddev docker
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  cd "${WT}"
+  # The primary checkout has no snapshot for --db=latest to reuse.
+  TMPDIR="${TESTDIR}" run "${DIR}/commands/host/fire-worktree-start" --db=latest
+  assert_failure
+  assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
+  refute_output --partial "Worktree URLs"
+  assert_line "Startup log: ${WT}/.ddev/${FW_LOG_NAME}"
+  assert [ ! -e "${TESTDIR}/ddev-fire-worktrees.lock" ]
+  run cat "${WT}/.ddev/${FW_LOG_NAME}"
+  assert_line "Configured DDEV project $(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)"
+  assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
 }

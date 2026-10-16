@@ -21,6 +21,7 @@ while [[ $# -gt 0 ]]; do
       echo "$usage"
       echo 'Gives the linked worktree you are in its own DDEV project, hostnames and database.'
       echo 'Safe to rerun: an existing environment keeps its name and data.'
+      echo 'Each run appends its output to .ddev/fire-worktree-start.log in the worktree.'
       exit 0
       ;;
     --db=*) db=${1#--db=} ;;

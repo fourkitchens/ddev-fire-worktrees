@@ -4,7 +4,9 @@
 | --- | --- |
 | `Couldn't snapshot <project>` | Startup used the last worktree copy instead, or the newest other snapshot if there's none. Start your main checkout with `ddev start`, or use `--db=fresh` or a SQL dump. |
 | `No earlier worktree copy to reuse` | `--db=latest` found no `fire-worktree-seed-*` snapshot, so it used the newest other snapshot it names. If that's the wrong data, run `ddev delete --omit-snapshot --yes` in the worktree, then `ddev fire-worktree-start --db=primary`. |
-| `The worktree is running, but the build failed` | The site is up with the copied database. Fix the error, then run the command it prints. Rerunning startup doesn't rebuild. |
+| An agent tool says only that its setup script failed | Read `.ddev/fire-worktree-start.log` in the worktree. Each start adds its output there. |
+| `The worktree is running, but the build failed` | The site is up with the copied database, at the URLs printed above the message. Fix the error, then run the command it prints. Rerunning startup doesn't rebuild. To have startup exit 0 when the build fails, set `WORKTREE_BUILD_FAILURE=warn`. |
+| `WORKTREE_BUILD_FAILURE must be fail or warn` | Fix the value in `.ddev/config.yaml` or `.ddev/config.local.yaml`. |
 | `The worktree is running, but the import failed` | The site is up, but its database is empty or partly imported. Fix the dump, then run the `ddev import-db` command it prints. |
 | `Waiting for another worktree to finish starting` | Another worktree is running `ddev start`. A lock left by a crashed run is cleared automatically. |
 | `Timed out waiting for .../fire-worktrees.lock` | A fire-worktree command has held the registry lock for 30 seconds. If none is running, delete the lock directory it names. |

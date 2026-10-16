@@ -52,8 +52,9 @@ which this add-on provides as an alias.
 | `ddev fire-worktree-remove [--yes] [--keep-checkout] [path]` | `worktree-remove` | Deletes the worktree's DDEV project and database, then removes the checkout. Keeps the branch. |
 | `ddev fire-worktree-prune [--yes]` | | Finds DDEV projects whose checkout is gone, for example after a tool deletes a worktree. Deletes them with `--yes`. |
 
-Run `create`, `list` and `prune` from any checkout of the repository. Run `start` inside a worktree.
-Run `remove` inside a worktree, or pass its path. Every command accepts `--help`.
+Run `create`, `list` and `prune` from any checkout of the repository. Run `start` inside a worktree;
+it appends its output to the worktree's `.ddev/fire-worktree-start.log`. Run `remove` inside a
+worktree, or pass its path. Every command accepts `--help`.
 
 `create` starts from `WORKTREE_BASE_REF`, else your remote's default branch, as it stands locally.
 Fetch first to start from the newest commit. `create` refuses a branch or directory that already exists.
@@ -73,7 +74,7 @@ deleting anything; pass `--yes` when no one is at the terminal.
 | [Configuration](docs/configuration.md) | Change worktree names, copied files, the default database or the build command. |
 | [Choosing the database](docs/databases.md) | Copy, reuse or import a database, or start empty. |
 | [Lando projects](docs/lando.md) | Use worktrees in a project that also has, or only has, a `.lando.yml`. |
-| [T3 and other agent tools](docs/agent-tools.md) | Start worktrees from T3, Claude Code and similar tools, and clean up after them. |
+| [T3 and other agent tools](docs/agent-tools.md) | Start worktrees from T3, Claude Code and similar tools, find out why a start failed, and clean up after them. |
 | [Migrating from project-local commands](docs/migrating.md) | Replace a project's own `worktree-*` commands and keep existing worktrees. |
 | [How it works](docs/how-it-works.md) | See what startup does and how names, hostnames, locks and prune work. |
 | [Troubleshooting](docs/troubleshooting.md) | Fix common errors and warnings. |

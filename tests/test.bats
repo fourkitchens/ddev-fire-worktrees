@@ -123,6 +123,8 @@ worktree_name() {
   assert_output "from-primary"
   assert_file_exists "${WT}/web/built.txt"
   assert_file_exists "${WT}/web/sites/default/settings.local.php"
+  run grep -c "Building with: " "${WT}/.ddev/fire-worktree-start.log"
+  assert_output "1"
   run git status --porcelain
   assert_output ""
   health_checks
@@ -192,6 +194,19 @@ EOF
   assert_output --partial "Skipped the build"
   run bash -c "cd '${TESTDIR}/primary-feature-dump' && ddev mysql -N -e 'SELECT v FROM marker'"
   assert_output "from-primary"
+
+  # A failed build leaves the site running, and warn lets startup exit 0.
+  printf 'web_environment: [WORKTREE_BUILD_COMMAND=false, WORKTREE_BUILD_FAILURE=warn]\n' >.ddev/config.local.yaml
+  run ddev fire-worktree-create feature/broken --db=reference/site-db.sql.gz
+  rm .ddev/config.local.yaml
+  assert_success
+  BROKEN="${TESTDIR}/primary-feature-broken"
+  assert_output --partial "Warning: The worktree is running, but the build failed. Fix the error, then run: false"
+  assert_output --partial "Startup log: ${BROKEN}/.ddev/fire-worktree-start.log"
+  run curl -sf "http://$(worktree_name "${BROKEN}").ddev.site"
+  assert_output "ok"
+  run grep -c "Building with: false" "${BROKEN}/.ddev/fire-worktree-start.log"
+  assert_output "1"
 
   run ddev fire-worktree-create feature/two --db=fresh
   assert_success

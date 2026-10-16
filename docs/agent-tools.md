@@ -8,6 +8,22 @@ A worktree inside your main checkout, such as Claude Code's `.claude/worktrees/`
 sibling directories are better: if your main project uses Mutagen, it syncs a nested worktree into
 its own container.
 
+## When startup fails
+
+Many tools show only that a setup script failed. Startup appends its output to
+`.ddev/fire-worktree-start.log` in the worktree, so you, or the agent in that thread, can read
+what went wrong.
+
+When the build fails, for example when `drush deploy` stops on a configuration error, the site is
+still running. Startup prints the URLs and the build command to rerun, then exits 1, so the tool
+reports the failure. To let the thread carry on in the running site instead, have startup exit 0:
+
+```yaml
+# .ddev/config.local.yaml, which new worktrees copy
+web_environment:
+    - WORKTREE_BUILD_FAILURE=warn
+```
+
 ## T3
 
 For [T3](https://t3.codes), add these actions to the project's `t3.json`:
