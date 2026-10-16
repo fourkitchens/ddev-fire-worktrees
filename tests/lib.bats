@@ -234,12 +234,12 @@ snapshot_dirs() {
 @test "the first start honors the config.local.yaml it copies in" {
   # The team's settings, committed.
   cat >"${SITE}/.ddev/config.yaml" <<'YAML'
-name: widener
+name: mysite
 type: php
 additional_hostnames:
-    - alumni.widener
+    - alumni.mysite
 web_environment:
-    - WORKTREE_NAME_PREFIX=wid
+    - WORKTREE_NAME_PREFIX=team
 YAML
   printf '/.ddev/config.local.yaml\n/notes.txt\n' >"${SITE}/.gitignore"
   git_site
@@ -250,7 +250,7 @@ web_environment:
     - WORKTREE_NAME_PREFIX=zz
     - WORKTREE_COPY_FILES=.ddev/config.local.yaml notes.txt
 additional_hostnames:
-    - extra.widener
+    - extra.mysite
 YAML
   echo notes >"${SITE}/notes.txt"
 
