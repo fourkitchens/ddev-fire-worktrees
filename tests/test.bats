@@ -313,6 +313,82 @@ SH
   assert_output "origin/feature/pr"
 }
 
+@test "starts worktrees in parallel, and --db=latest reuses the last copy over a newer snapshot" {
+  set -eu -o pipefail
+  install_and_start "${DIR}"
+
+  # Agent tools start several worktrees at once.
+  local i
+  local -a pids=()
+  for i in 1 2 3; do
+    git worktree add -q -b "parallel/$i" "../primary-parallel-$i" main
+  done
+  for i in 1 2 3; do
+    (cd "${TESTDIR}/primary-parallel-$i" && ddev fire-worktree-start) >"${TESTDIR}/start-$i.log" 2>&1 &
+    pids+=("$!")
+  done
+  for i in 1 2 3; do
+    wait "${pids[i - 1]}" || fail "$(printf 'Starting primary-parallel-%s failed:\n' "$i" && cat "${TESTDIR}/start-$i.log")"
+  done
+
+  # Each has its own running project with the primary's data, and a registry entry.
+  local expected=
+  for i in 1 2 3; do
+    WT="${TESTDIR}/primary-parallel-$i"
+    NAME=$(worktree_name "${WT}")
+    expected+=$(printf '%s\t%s' "${NAME}" "${WT}")$'\n'
+    run curl -sf "http://${NAME}.ddev.site"
+    assert_output "ok"
+    run bash -c "cd '${WT}' && ddev mysql -N -e 'SELECT v FROM marker'"
+    assert_output "from-primary"
+  done
+  run sort .git/fire-worktrees
+  assert_output "$(printf '%s' "${expected}" | sort)"
+  run bash -c 'ls .ddev/db_snapshots | grep -c "^fire-worktree-seed-"'
+  assert_output "1"
+
+  # A snapshot taken by hand after the last copy doesn't replace it.
+  run ddev mysql -e "UPDATE marker SET v = 'by-hand'"
+  assert_success
+  run ddev snapshot --name=before-experiment
+  assert_success
+  run ddev fire-worktree-create feature/latest --db=latest --no-build
+  assert_success
+  assert_output --partial "Seeding the new database from ${PRIMARY}/.ddev/db_snapshots/fire-worktree-seed-"
+  run bash -c "cd '${TESTDIR}/primary-feature-latest' && ddev mysql -N -e 'SELECT v FROM marker'"
+  assert_output "from-primary"
+}
+
+@test "a Postgres project's worktree copies its database and keeps it on rerun" {
+  set -eu -o pipefail
+  sed -i.bak -e 's/type: mariadb/type: postgres/' -e 's/version: "10.11"/version: "17"/' .ddev/config.yaml
+  rm .ddev/config.yaml.bak
+  run ddev add-on get "${DIR}"
+  assert_success
+  git add -A
+  git commit -qm 'Install ddev-fire-worktrees'
+  run ddev start -y
+  assert_success
+  run ddev psql -c "CREATE TABLE marker (v VARCHAR(20)); INSERT INTO marker VALUES ('from-primary');"
+  assert_success
+
+  run ddev fire-worktree-create feature/pg
+  assert_success
+  assert_output --partial "Seeding the new database from ${PRIMARY}/.ddev/db_snapshots/fire-worktree-seed-"
+  cd "${TESTDIR}/primary-feature-pg"
+  run ddev psql -tA -c 'SELECT v FROM marker'
+  assert_output "from-primary"
+
+  # A rerun finds the postgres volume, so it doesn't copy the database again.
+  run ddev psql -c "INSERT INTO marker VALUES ('worktree-only')"
+  assert_success
+  run ddev fire-worktree-start
+  assert_success
+  refute_output --partial "Seeding the new database"
+  run ddev psql -tA -c 'SELECT COUNT(*) FROM marker'
+  assert_output "2"
+}
+
 @test "a standard Drupal site needs no settings: the worktree copies the database and runs drush deploy" {
   set -eu -o pipefail
   # One Drupal site, no extra hostnames and no WORKTREE_* settings, like most projects.
