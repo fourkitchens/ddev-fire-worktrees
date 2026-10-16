@@ -212,3 +212,62 @@ YAML
   assert_output --regexp '^alumni\.zz-feature-x-[0-9]+
 extra\.zz-feature-x-[0-9]+$'
 }
+
+@test "parallel registry writes keep every entry" {
+  printf 'name: mysite\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  fw::context "${SITE}"
+  local i
+  for i in $(seq 1 10); do
+    fw::registry_add "old-$i" "/old/$i"
+  done
+  # Starts add entries while removes and prunes drop others.
+  for i in $(seq 1 10); do
+    fw::registry_add "new-$i" "/new/$i" &
+    fw::registry_remove "old-$i" &
+  done
+  wait
+  run sort "$(fw::registry_file)"
+  assert_output "$(for i in $(seq 1 10); do printf 'new-%s\t/new/%s\n' "$i" "$i"; done | sort)"
+}
+
+@test "clears a registry lock left by a crashed run" {
+  printf 'name: mysite\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  fw::context "${SITE}"
+  # A pid that has exited.
+  sh -c 'exit 0' &
+  local pid=$!
+  wait "$pid"
+  mkdir "$(fw::registry_file).lock"
+  echo "$pid" >"$(fw::registry_file).lock/pid"
+  run fw::registry_add one /one
+  assert_success
+  run cat "$(fw::registry_file)"
+  assert_output "$(printf 'one\t/one')"
+  assert [ ! -e "$(fw::registry_file).lock" ]
+}
+
+@test "parallel starts record every worktree" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  local i
+  for i in 1 2 3 4; do
+    git -C "${SITE}" worktree add -q -b "feature/$i" "${TESTDIR}/site-feature-$i"
+  done
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  for i in 1 2 3 4; do
+    (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
+  done
+  wait
+  cut -f2 "${SITE}/.git/fire-worktrees" | sort >"${TESTDIR}/recorded"
+  run cat "${TESTDIR}/recorded"
+  assert_output "$(printf '%s\n' "${TESTDIR}"/site-feature-{1,2,3,4} | sort)"
+  run grep -cxF "/.ddev/${FW_CONFIG_NAME}" "${SITE}/.git/info/exclude"
+  assert_output 1
+}

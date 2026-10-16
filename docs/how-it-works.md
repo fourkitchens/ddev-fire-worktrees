@@ -30,8 +30,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
   replaces a worktree's data. See [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
-* **Prune.** Startup records each worktree in `.git/fire-worktrees`. Prune deletes only recorded
-  projects whose checkout is gone. It lists, but never deletes, older worktree projects that match
+* **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
+  (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
+  Prune deletes only recorded projects whose checkout is gone. It lists, but never deletes, older worktree projects that match
   your prefix, since another clone may own them.
 * **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
   they didn't write, or to remove a checkout with uncommitted work. They never delete branches.
