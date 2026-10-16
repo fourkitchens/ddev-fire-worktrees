@@ -10,8 +10,8 @@ bats ./tests/lib.bats                           # library tests, a few seconds, 
 bats ./tests --filter-tags '!release'           # everything, with real DDEV projects
 ```
 
-The DDEV tests start real projects, including a Drupal 11 site, under `~/tmp`, and delete them
-afterwards. They take about four minutes on a laptop.
+The DDEV tests start real projects, including a Drupal 11 site and a Postgres project, under
+`~/tmp`, and delete them afterwards. They take about seven minutes on a laptop.
 
 To try a change in a project before it's released:
 
