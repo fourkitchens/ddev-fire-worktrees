@@ -331,7 +331,7 @@ fw::default_ref() {
 # fw::seed_snapshot MODE: print the snapshot file to seed a new database from,
 # or nothing for a fresh database.
 fw::seed_snapshot() {
-  local mode=$1 dir primary snap f newest='' type version
+  local mode=$1 dir primary snap f newest='' other='' type version
   case $mode in
     fresh)
       return 0
@@ -359,7 +359,8 @@ fw::seed_snapshot() {
         fi
       fi
       if [[ -z "$newest" ]]; then
-        # The newest snapshot that matches this worktree's database server.
+        # The newest seed snapshot that matches this worktree's database server,
+        # else the newest other snapshot that does, such as one taken by hand.
         type=$(fw::config_nested "$FW_ROOT" database type)
         version=$(fw::config_nested "$FW_ROOT" database version)
         while IFS= read -r f; do
@@ -367,15 +368,21 @@ fw::seed_snapshot() {
           if [[ -n "$type" && -n "$version" && "$f" != *"-${type}_${version}."* ]]; then
             continue
           fi
-          newest="$dir/$f"
-          break
+          if [[ "$f" == "$FW_SEED_PREFIX"-* ]]; then
+            newest="$dir/$f"
+            break
+          fi
+          other=${other:-"$dir/$f"}
         done < <(ls -t "$dir" 2>/dev/null)
-        if [[ -z "$newest" ]]; then
+        if [[ -z "$newest" && -z "$other" ]]; then
           fw::die "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
         fi
         if [[ "$mode" == primary ]]; then
-          fw::warn "Using the older snapshot $(basename "$newest") instead."
+          fw::warn "Using the older snapshot $(basename "${newest:-$other}") instead."
+        elif [[ -z "$newest" ]]; then
+          fw::warn "No earlier worktree copy to reuse, so using the snapshot $(basename "$other"). Use --db=primary for a new copy, or --db=<file> to choose one."
         fi
+        newest=${newest:-$other}
       fi
       printf '%s' "$newest"
       ;;

@@ -154,6 +154,61 @@ EOF
   assert_failure
 }
 
+# snapshot_dirs: a primary checkout with a db_snapshots directory, and a
+# worktree on the same database server.
+snapshot_dirs() {
+  FW_PRIMARY_ROOT="${SITE}"
+  FW_ROOT="${TESTDIR}/site-feature-x"
+  SNAPS="${SITE}/.ddev/db_snapshots"
+  mkdir -p "${SNAPS}" "${FW_ROOT}/.ddev"
+  printf 'name: mysite\ndatabase:\n  type: mariadb\n  version: "10.11"\n' >"${SITE}/.ddev/config.yaml"
+  cp "${SITE}/.ddev/config.yaml" "${FW_ROOT}/.ddev/config.yaml"
+}
+
+@test "--db=latest reuses the last worktree copy, not a newer snapshot taken by hand" {
+  snapshot_dirs
+  touch -t 202610010000 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  run fw::seed_snapshot latest
+  assert_success
+  assert_output "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+}
+
+@test "--db=latest falls back to another snapshot, and names it" {
+  snapshot_dirs
+  touch -t 202610010000 "${SNAPS}/old-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  # A seed snapshot for another database server doesn't count.
+  touch -t 202610030000 "${SNAPS}/fire-worktree-seed-20261003000000-mysql_8.0.gz"
+  touch -t 202610040000 "${SNAPS}/newer-mysql_8.0.gz"
+  run fw::seed_snapshot latest
+  assert_success
+  assert_output --partial "No earlier worktree copy to reuse, so using the snapshot before-experiment-mariadb_10.11.gz."
+  assert_line --index 1 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+
+  rm -f "${SNAPS}"/*mariadb*
+  run fw::seed_snapshot latest
+  assert_failure
+  assert_output --partial "no database snapshot to copy"
+}
+
+@test "--db=primary falls back to the last worktree copy when it can't snapshot" {
+  snapshot_dirs
+  ddev() { return 1; }
+  touch -t 202610010000 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  run fw::seed_snapshot primary
+  assert_success
+  assert_output --partial "Couldn't snapshot mysite."
+  assert_output --partial "Using the older snapshot fire-worktree-seed-20261001000000-mariadb_10.11.gz instead."
+  assert_line --index 3 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+
+  rm -f "${SNAPS}"/fire-worktree-seed-*
+  run fw::seed_snapshot primary
+  assert_success
+  assert_output --partial "Using the older snapshot before-experiment-mariadb_10.11.gz instead."
+}
+
 @test "makes DNS-safe slugs" {
   run fw::slug "Feature/ABC-123_Hero Banner" 80
   assert_output "feature-abc-123-hero-banner"
