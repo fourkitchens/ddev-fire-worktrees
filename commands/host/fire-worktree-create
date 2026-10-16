@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #ddev-generated
 
-## Description: Create a branch in a sibling Git worktree, then give it its own DDEV project and database
-## Usage: fire-worktree-create <branch> [start-point] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
-## Example: ddev fire-worktree-create ABC-123-short-description\nddev fire-worktree-create ABC-123-short-description origin/main --db=fresh
+## Description: Create a sibling Git worktree for a new or existing branch or a pull request, then give it its own DDEV project and database
+## Usage: fire-worktree-create <branch> [start-point] | --pr=<number> [--base] [branch] [--fetch] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
+## Example: ddev fire-worktree-create ABC-123-short-description\nddev fire-worktree-create ABC-123-short-description origin/main --db=fresh\nddev fire-worktree-create --fetch ABC-456-pushed-by-a-teammate\nddev fire-worktree-create --pr=123 --base
 ## Aliases: worktree-create
-## Flags: [{"Name":"db","Type":"string","Usage":"Database for the new worktree: primary (snapshot the primary checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"}]
+## Flags: [{"Name":"pr","Type":"string","Usage":"Check out this pull request from origin, as a branch named after its head branch when gh can look it up, else as pr-<number>"},{"Name":"base","Usage":"With --pr, also create a worktree on the pull request's base branch, for before-and-after comparisons"},{"Name":"fetch","Usage":"Run git fetch origin before resolving branches and start points"},{"Name":"db","Type":"string","Usage":"Database for the new worktree: primary (snapshot the primary checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"}]
 
 set -euo pipefail
 
@@ -13,20 +13,44 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=fire-worktrees/lib.sh
 source "$here/../../fire-worktrees/lib.sh"
 
-usage='Usage: ddev fire-worktree-create <branch> [start-point] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]'
+usage='Usage: ddev fire-worktree-create <branch> [start-point] [options]
+       ddev fire-worktree-create --pr=<number> [--base] [branch] [options]
+Options: --fetch --db=primary|latest|fresh|<snapshot or dump> --no-build'
 branch=
 start_point=
+pr=
+with_base=false
+fetch=false
 db=
 build=true
 while [[ $# -gt 0 ]]; do
   case $1 in
     -h | --help)
       echo "$usage"
-      echo 'Creates a new branch in a directory beside the primary checkout, then runs'
-      echo 'fire-worktree-start there. The start point defaults to WORKTREE_BASE_REF, else'
-      echo "the remote's default branch. It is used as-is; fetch first to update it."
+      echo
+      echo 'Creates a worktree in a directory beside the primary checkout, then runs'
+      echo 'fire-worktree-start there. A new branch starts from start-point, else'
+      echo "WORKTREE_BASE_REF, else the remote's default branch. An existing local branch"
+      echo 'is checked out as it is. A branch that only origin has gets a local branch that'
+      echo 'tracks it.'
+      echo
+      echo '--pr checks out a pull request from origin, as a branch named after its head'
+      echo 'branch when gh can look it up, else as pr-<number>. Pass a branch to choose the'
+      echo "name. --base also creates a worktree on the pull request's base branch."
+      echo
+      echo 'Branches and start points are used as they stand locally. --fetch runs'
+      echo "git fetch origin first; a new branch then starts from origin's copy of"
+      echo 'WORKTREE_BASE_REF or the default branch.'
       exit 0
       ;;
+    --pr=*) pr=${1#--pr=} ;;
+    --pr)
+      [[ $# -ge 2 ]] || fw::die "$usage"
+      pr=$2
+      shift
+      ;;
+    --base) with_base=true ;;
+    --fetch) fetch=true ;;
     --db=*) db=${1#--db=} ;;
     --db)
       [[ $# -ge 2 ]] || fw::die "$usage"
@@ -47,7 +71,14 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
-[[ -n "$branch" ]] || fw::die "$usage"
+if [[ -n "$pr" ]]; then
+  pr=${pr#\#}
+  [[ "$pr" =~ ^[1-9][0-9]*$ ]] || fw::die "--pr takes a pull request number; got $pr."
+  [[ -z "$start_point" ]] || fw::die "$usage"
+else
+  [[ "$with_base" == false ]] || fw::die '--base works only with --pr.'
+  [[ -n "$branch" ]] || fw::die "$usage"
+fi
 
 # Startup runs in the new worktree, so resolve a file path from here first.
 db=$(fw::db_arg "$db")
@@ -56,36 +87,192 @@ db=$(fw::db_arg "$db")
 fw::context "$PWD"
 source_root=$FW_ROOT
 [[ -n "$FW_PRIMARY_ROOT" ]] || fw::die 'fire-worktree-create needs a primary checkout; bare repositories are not supported.'
-start_point=${start_point:-$(fw::setting "$FW_ROOT" WORKTREE_BASE_REF "")}
-start_point=${start_point:-$(fw::default_ref)}
+
+if [[ "$fetch" == true ]]; then
+  git -C "$FW_ROOT" fetch origin || fw::die "Couldn't fetch origin."
+fi
+
+# Resolve the branch. A new branch starts at commit; one with an upstream on
+# origin tracks upstream_ref there.
+commit=
+upstream_ref=
+base_commit=
+summary=
+notes=
+if [[ -n "$pr" ]]; then
+  # Name the branch after the pull request's head branch. A fork's branch can
+  # share a name with one of origin's, such as main, so add the fork's owner.
+  name=
+  if fw::pr_info "$pr"; then
+    if [[ "$FW_PR_FORK" != true ]]; then
+      name=$FW_PR_HEAD
+    elif [[ -n "$FW_PR_OWNER" ]]; then
+      name=$FW_PR_OWNER/$FW_PR_HEAD
+    fi
+  else
+    [[ "$with_base" == false ]] || fw::die "--base needs gh to look up pull request $pr's base branch."
+    if command -v gh >/dev/null 2>&1; then
+      fw::warn "Couldn't look up pull request $pr with gh, so naming its branch pr-$pr."
+    else
+      echo "Naming the branch pr-$pr. Install gh to name it after the pull request's branch."
+    fi
+  fi
+  branch=${branch:-${name:-pr-$pr}}
+
+  # A pull request from this repository is origin's branch, which updates as
+  # soon as it's pushed. Fetch any other through GitHub's pull request ref.
+  if [[ -n "$FW_PR_HEAD" && "$FW_PR_FORK" != true ]]; then
+    upstream_ref=refs/heads/$FW_PR_HEAD
+    head_ref=refs/remotes/origin/$FW_PR_HEAD
+  else
+    upstream_ref=refs/pull/$pr/head
+    head_ref=refs/fire-worktrees/pull-$pr-$$
+  fi
+  refspecs=("+$upstream_ref:$head_ref")
+  if [[ "$with_base" == true ]]; then
+    refspecs+=("+refs/heads/$FW_PR_BASE:refs/remotes/origin/$FW_PR_BASE")
+  fi
+  git -C "$FW_ROOT" fetch --no-tags origin "${refspecs[@]}" || fw::die "Couldn't fetch pull request $pr from origin."
+  commit=$(git -C "$FW_ROOT" rev-parse --verify "$head_ref^{commit}")
+  if [[ "$head_ref" == refs/fire-worktrees/* ]]; then
+    git -C "$FW_ROOT" update-ref -d "$head_ref"
+  fi
+  if [[ "$with_base" == true ]]; then
+    base_commit=$(git -C "$FW_ROOT" rev-parse --verify "refs/remotes/origin/$FW_PR_BASE^{commit}")
+  fi
+  summary="Checked out pull request #$pr as branch $branch in:"
+elif [[ "$branch" == origin/* ]] &&
+  ! git -C "$FW_ROOT" show-ref --verify --quiet "refs/heads/$branch" &&
+  git -C "$FW_ROOT" show-ref --verify --quiet "refs/remotes/$branch"; then
+  # origin/<branch> names origin's branch, not a new local branch called that.
+  branch=${branch#origin/}
+fi
 
 git -C "$FW_ROOT" check-ref-format --branch "$branch" >/dev/null || fw::die "$branch is not a valid branch name."
+exists=false
 if git -C "$FW_ROOT" show-ref --verify --quiet "refs/heads/$branch"; then
-  fw::die "Branch $branch already exists. Choose a new branch name."
+  exists=true
+  where=$(fw::checked_out_at "$branch")
+  if [[ -n "$where" && -d "$where" ]]; then
+    fw::die "Branch $branch is already checked out in $where."
+  elif [[ -n "$where" ]]; then
+    fw::die "Branch $branch is checked out in $where, which no longer exists. Run git worktree prune, then try again."
+  fi
 fi
-commit=$(git -C "$FW_ROOT" rev-parse --verify --quiet --end-of-options "${start_point}^{commit}") ||
-  fw::die "Can't find start point $start_point."
 
 slug=$(fw::slug "$branch" 80)
 target="$(dirname "$FW_PRIMARY_ROOT")/$(basename "$FW_PRIMARY_ROOT")-${slug:-worktree}"
-if [[ -e "$target" || -L "$target" ]]; then
-  fw::die "Destination already exists: $target. Choose a different branch name."
+base_target=
+if [[ -n "$base_commit" ]]; then
+  base_target=$target-base
+fi
+for dir in "$target" ${base_target:+"$base_target"}; do
+  if [[ -e "$dir" || -L "$dir" ]]; then
+    fw::die "Destination already exists: $dir. Remove it, or choose a different branch name."
+  fi
+done
+
+if [[ -n "$pr" ]]; then
+  if [[ "$exists" == true ]]; then
+    tip=$(git -C "$FW_ROOT" rev-parse "refs/heads/$branch")
+    if [[ "$tip" == "$commit" ]]; then
+      :
+    elif git -C "$FW_ROOT" merge-base --is-ancestor "$tip" "$commit" &&
+      [[ "$(git -C "$FW_ROOT" config "branch.$branch.remote" || true)" == origin &&
+      "$(git -C "$FW_ROOT" config "branch.$branch.merge" || true)" == "$upstream_ref" ]]; then
+      # This pull request's branch from an earlier checkout, behind the pull
+      # request. Fast-forward it, as git pull would.
+      git -C "$FW_ROOT" update-ref -m "fire-worktree-create: fast-forward to pull request $pr" "refs/heads/$branch" "$commit" "$tip"
+    elif git -C "$FW_ROOT" merge-base --is-ancestor "$commit" "$tip"; then
+      notes="Branch $branch has commits that pull request #$pr doesn't."
+    else
+      fw::die "Branch $branch already exists and doesn't have pull request #$pr's latest commit. Update or delete it, or name another branch: ddev fire-worktree-create --pr=$pr <branch>"
+    fi
+  fi
+elif [[ "$exists" == true ]]; then
+  [[ -z "$start_point" ]] ||
+    fw::die "Branch $branch already exists, so it can't start from $start_point. Leave out the start point to check it out, or choose a new branch name."
+  summary="Checked out branch $branch in:"
+elif git -C "$FW_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+  [[ -z "$start_point" ]] ||
+    fw::die "origin has branch $branch, so it can't start from $start_point. Leave out the start point to check out origin's branch, or choose a new branch name."
+  commit=$(git -C "$FW_ROOT" rev-parse --verify "refs/remotes/origin/$branch^{commit}")
+  upstream_ref=refs/heads/$branch
+  summary="Created branch $branch from origin/$branch, which it tracks, in:"
+else
+  if [[ -z "$start_point" ]]; then
+    start_point=$(fw::setting "$FW_ROOT" WORKTREE_BASE_REF "")
+    start_point=${start_point:-$(fw::default_ref)}
+    # After a fetch, origin's copy of the branch is the newest.
+    if [[ "$fetch" == true ]] && git -C "$FW_ROOT" show-ref --verify --quiet "refs/remotes/origin/$start_point"; then
+      start_point=origin/$start_point
+    fi
+  fi
+  commit=$(git -C "$FW_ROOT" rev-parse --verify --quiet --end-of-options "${start_point}^{commit}") ||
+    fw::die "Can't find start point $start_point."
+  summary="Created branch $branch from $start_point in:"
 fi
 
-git -C "$FW_ROOT" worktree add -b "$branch" "$target" "$commit"
+if [[ "$exists" == true ]]; then
+  git -C "$FW_ROOT" worktree add "$target" "$branch"
+else
+  git -C "$FW_ROOT" worktree add -b "$branch" "$target" "$commit"
+  if [[ -n "$upstream_ref" ]]; then
+    git -C "$FW_ROOT" config "branch.$branch.remote" origin
+    git -C "$FW_ROOT" config "branch.$branch.merge" "$upstream_ref"
+  fi
+fi
+if [[ -n "$base_target" ]]; then
+  git -C "$FW_ROOT" worktree add --detach "$base_target" "$base_commit"
+fi
 
-# Run this checkout's copy of startup in the new worktree, so a start point
-# that predates the add-on still works.
-set --
-if [[ -n "$db" ]]; then
-  set -- "--db=$db"
+# start_in DIR DB: run this checkout's copy of startup in DIR, so a branch that
+# predates the add-on still works.
+start_in() {
+  local dir=$1 db=$2
+  set --
+  if [[ -n "$db" ]]; then
+    set -- "--db=$db"
+  fi
+  if [[ "$build" == false ]]; then
+    set -- "$@" --no-build
+  fi
+  if ! (cd "$dir" && WORKTREE_SOURCE_ROOT="$source_root" "$here/fire-worktree-start" "$@"); then
+    printf '\nCreated %s, but startup failed. Fix the error, then retry:\n' "$dir" >&2
+    printf '  cd %q && ddev fire-worktree-start\n' "$dir" >&2
+    return 1
+  fi
+}
+
+failed=false
+base_db=$db
+if start_in "$target" "$db"; then
+  # Give the base worktree the copy the pull request's worktree just took, so
+  # the two start from the same data.
+  if [[ "${db:-$(fw::setting "$target" WORKTREE_DB primary)}" == primary ]]; then
+    base_db=latest
+  fi
+else
+  failed=true
 fi
-if [[ "$build" == false ]]; then
-  set -- "$@" --no-build
+if [[ -n "$base_target" ]] && ! start_in "$base_target" "$base_db"; then
+  failed=true
 fi
-if ! (cd "$target" && WORKTREE_SOURCE_ROOT="$source_root" "$here/fire-worktree-start" "$@"); then
-  printf '\nCreated %s, but startup failed. Fix the error, then retry:\n' "$target" >&2
-  printf '  cd %q && ddev fire-worktree-start\n' "$target" >&2
-  exit 1
+[[ "$failed" == false ]] || exit 1
+
+printf '\n%s\n  %s\n' "$summary" "$target"
+if [[ -n "$base_target" ]]; then
+  printf 'Checked out its base, origin/%s, in:\n  %s\n' "$FW_PR_BASE" "$base_target"
 fi
-printf '\nCreated branch %s from %s in:\n  %s\n' "$branch" "$start_point" "$target"
+if [[ "$exists" == true && -z "$pr" ]] &&
+  upstream=$(git -C "$FW_ROOT" rev-parse --abbrev-ref "$branch@{upstream}" 2>/dev/null); then
+  behind=$(git -C "$FW_ROOT" rev-list --count "refs/heads/$branch..$branch@{upstream}")
+  if [[ "$behind" == 1 ]]; then
+    notes="Branch $branch is 1 commit behind $upstream. To update it, run git pull in the worktree."
+  elif [[ "$behind" != 0 ]]; then
+    notes="Branch $branch is $behind commits behind $upstream. To update it, run git pull in the worktree."
+  fi
+fi
+if [[ -n "$notes" ]]; then
+  fw::warn "$notes"
+fi

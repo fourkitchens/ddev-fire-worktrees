@@ -413,6 +413,32 @@ fw::default_ref() {
   printf '%s' "$ref"
 }
 
+# fw::checked_out_at BRANCH: the worktree that has BRANCH checked out, if any.
+fw::checked_out_at() {
+  git -C "$FW_ROOT" worktree list --porcelain | awk -v ref="branch refs/heads/$1" '
+    index($0, "worktree ") == 1 { path = substr($0, 10) }
+    $0 == ref && !found { print path; found = 1 }'
+}
+
+# fw::pr_info NUMBER: look up pull request NUMBER on origin with gh. Sets
+# FW_PR_HEAD and FW_PR_BASE to its head and base branches, FW_PR_FORK to true
+# when its head branch is in a fork, and FW_PR_OWNER to the head's owner. Fails
+# without gh.
+fw::pr_info() {
+  local url info
+  FW_PR_HEAD=''
+  FW_PR_BASE=''
+  FW_PR_FORK=''
+  FW_PR_OWNER=''
+  command -v gh >/dev/null 2>&1 || return 1
+  url=$(git -C "$FW_ROOT" remote get-url origin) || return 1
+  info=$(gh pr view "$1" --repo "$url" --json headRefName,baseRefName,isCrossRepository,headRepositoryOwner \
+    --jq '.headRefName, .baseRefName, .isCrossRepository, (.headRepositoryOwner.login // "")') || return 1
+  # shellcheck disable=SC2034 # fire-worktree-create reads FW_PR_FORK and FW_PR_OWNER.
+  { IFS= read -r FW_PR_HEAD && IFS= read -r FW_PR_BASE && IFS= read -r FW_PR_FORK && IFS= read -r FW_PR_OWNER; } <<<"$info" || return 1
+  [[ -n "$FW_PR_HEAD" && -n "$FW_PR_BASE" ]]
+}
+
 # fw::seed_snapshot MODE: print the snapshot file to seed a new database from,
 # or nothing for a fresh database.
 fw::seed_snapshot() {
