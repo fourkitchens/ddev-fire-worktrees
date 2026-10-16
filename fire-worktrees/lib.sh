@@ -270,6 +270,38 @@ fw::db_volume_exists() {
   docker volume ls -q 2>/dev/null | grep -Eq "^$1-(mariadb|mysql|postgres)\$"
 }
 
+# fw::compose_project NAME: the Docker Compose project DDEV runs NAME as.
+fw::compose_project() {
+  printf 'ddev-%s' "$1" | tr -d . | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
+# fw::project_volumes NAME: the volumes Docker Compose created for NAME, which
+# include the database and add-on services such as Solr and Redis.
+fw::project_volumes() {
+  docker volume ls -q --filter "label=com.docker.compose.project=$(fw::compose_project "$1")" 2>/dev/null || true
+}
+
+# fw::has_environment NAME: true while DDEV knows NAME or any of its volumes remain.
+fw::has_environment() {
+  ddev describe "$1" >/dev/null 2>&1 || fw::db_volume_exists "$1" || [[ -n "$(fw::project_volumes "$1")" ]]
+}
+
+# fw::delete_project NAME: delete NAME's DDEV project and every volume it left.
+# Once the checkout is gone, DDEV can't read the compose file that lists add-on
+# services' volumes, so ddev delete leaves them.
+fw::delete_project() {
+  local volume
+  ddev delete --omit-snapshot --yes "$1"
+  while IFS= read -r volume; do
+    [[ -n "$volume" ]] || continue
+    if docker volume rm "$volume" >/dev/null; then
+      printf 'Deleted volume %s\n' "$volume"
+    else
+      fw::warn "Couldn't delete volume $volume."
+    fi
+  done < <(fw::project_volumes "$1")
+}
+
 fw::lock() {
   local waited=0 pid
   while ! mkdir "$FW_LOCK" 2>/dev/null; do

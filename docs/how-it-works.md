@@ -31,7 +31,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   replaces a worktree's data. See [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`. Prune deletes only recorded
-  projects whose checkout is gone. It lists, but never deletes, older worktree projects that match
+  projects whose checkout is gone. Without the checkout, `ddev delete` can't find add-on services'
+  volumes, such as Solr's, so prune also deletes every volume Docker Compose labelled with the
+  project. It lists, but never deletes, older worktree projects and leftover volumes that match
   your prefix, since another clone may own them.
 * **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
   they didn't write, or to remove a checkout with uncommitted work. They never delete branches.

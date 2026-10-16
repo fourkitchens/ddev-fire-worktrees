@@ -32,6 +32,6 @@ with `ddev fire-worktree-prune --yes`.
 
 ## Cleaning up after other tools
 
-When a tool deletes a worktree's checkout itself, its DDEV project and database stay behind. Run
-`ddev fire-worktree-prune` from any checkout to list them, and `ddev fire-worktree-prune --yes` to
-delete them.
+When a tool deletes a worktree's checkout itself, its DDEV project, database and service volumes
+stay behind. Run `ddev fire-worktree-prune` from any checkout to list them, and
+`ddev fire-worktree-prune --yes` to delete them.
