@@ -298,6 +298,33 @@ YAML
 extra\.zz-feature-x-[0-9]+$'
 }
 
+@test "copies local files from T3CODE_PROJECT_ROOT rather than the primary" {
+  printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
+  printf '/.ddev/config.local.yaml\n/web/sites/default/settings.local.php\n' >"${SITE}/.gitignore"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+  # The checkout T3 names has both files on the default WORKTREE_COPY_FILES
+  # list. The primary has only an older settings.local.php.
+  T3_ROOT="${TESTDIR}/t3-root"
+  mkdir -p "${T3_ROOT}/.ddev" "${T3_ROOT}/web/sites/default" "${SITE}/web/sites/default"
+  printf 'xdebug_enabled: true\n' >"${T3_ROOT}/.ddev/config.local.yaml"
+  echo '<?php // from T3' >"${T3_ROOT}/web/sites/default/settings.local.php"
+  echo '<?php // from the primary' >"${SITE}/web/sites/default/settings.local.php"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  FW_LOCK="${TESTDIR}/lock"
+  unset WORKTREE_SOURCE_ROOT
+  T3CODE_PROJECT_ROOT="${T3_ROOT}"
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_output --partial "Copied .ddev/config.local.yaml"
+  assert_output --partial "Copied web/sites/default/settings.local.php"
+  run cat "${TESTDIR}/site-feature-x/web/sites/default/settings.local.php"
+  assert_output '<?php // from T3'
+}
+
 @test "parallel registry writes keep every entry" {
   printf 'name: mysite\n' >"${SITE}/.ddev/config.yaml"
   git_site
