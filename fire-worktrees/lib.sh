@@ -302,14 +302,24 @@ fw::delete_project() {
   done < <(fw::project_volumes "$1")
 }
 
-fw::lock() {
-  local waited=0 pid
-  while ! mkdir "$FW_LOCK" 2>/dev/null; do
-    pid=$(cat "$FW_LOCK/pid" 2>/dev/null || true)
+# fw::try_lock DIR: take the lock at DIR, clearing one left by a process that
+# has exited. Fails while a running process holds it.
+fw::try_lock() {
+  local pid
+  until mkdir "$1" 2>/dev/null; do
+    pid=$(cat "$1/pid" 2>/dev/null || true)
     if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-      rm -rf "$FW_LOCK"
+      rm -rf "$1"
       continue
     fi
+    return 1
+  done
+  echo $$ >"$1/pid"
+}
+
+fw::lock() {
+  local waited=0
+  while ! fw::try_lock "$FW_LOCK"; do
     if ((waited % 30 == 0)); then
       echo 'Waiting for another worktree to finish starting...'
     fi
@@ -319,7 +329,6 @@ fw::lock() {
     sleep 2
     waited=$((waited + 2))
   done
-  echo $$ >"$FW_LOCK/pid"
   trap 'rm -rf "$FW_LOCK"' EXIT
 }
 
@@ -334,7 +343,30 @@ fw::registry_file() {
   printf '%s/fire-worktrees' "$FW_COMMON_DIR"
 }
 
-fw::registry_remove() {
+# Registry changes take a lock of their own, so parallel starts, removes and
+# prunes keep each other's entries. It's held for moments, unlike the start lock
+# that's held through ddev start. Take it only while not holding the start lock,
+# since each sets the EXIT trap.
+fw::with_registry_lock() {
+  local lock waited=0 status=0
+  lock="$(fw::registry_file).lock"
+  while ! fw::try_lock "$lock"; do
+    if ((waited >= 300)); then
+      fw::die "Timed out waiting for $lock. Delete it if no other fire-worktree command is running."
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  # shellcheck disable=SC2064 # Expand now; lock is local.
+  trap "rm -rf $(printf '%q' "$lock")" EXIT
+  "$@" || status=$?
+  rm -rf "$lock"
+  trap - EXIT
+  return "$status"
+}
+
+# fw::registry_drop NAME: remove NAME's entry. Hold the registry lock.
+fw::registry_drop() {
   local file tmp
   file=$(fw::registry_file)
   [[ -f "$file" ]] || return 0
@@ -342,9 +374,30 @@ fw::registry_remove() {
   awk -F '\t' -v name="$1" '$1 != name' "$file" >"$tmp" && mv "$tmp" "$file"
 }
 
+# fw::registry_put NAME PATH: record NAME at PATH. Hold the registry lock.
+fw::registry_put() {
+  fw::registry_drop "$1" &&
+    printf '%s\t%s\n' "$1" "$2" >>"$(fw::registry_file)"
+}
+
+fw::registry_remove() {
+  fw::with_registry_lock fw::registry_drop "$1"
+}
+
 fw::registry_add() {
-  fw::registry_remove "$1"
-  printf '%s\t%s\n' "$1" "$2" >>"$(fw::registry_file)"
+  fw::with_registry_lock fw::registry_put "$1" "$2"
+}
+
+# fw::record_worktree: exclude FW_ROOT's generated config from Git and record
+# FW_NAME in the registry. Hold the registry lock.
+fw::record_worktree() {
+  # DDEV gitignores config.*.local.yaml once it writes .ddev/.gitignore. Exclude
+  # the file in Git too, so a checkout that never started stays clean.
+  mkdir -p "$FW_COMMON_DIR/info" || return 1
+  if ! grep -qxF "/.ddev/$FW_CONFIG_NAME" "$FW_COMMON_DIR/info/exclude" 2>/dev/null; then
+    printf '/.ddev/%s\n' "$FW_CONFIG_NAME" >>"$FW_COMMON_DIR/info/exclude" || return 1
+  fi
+  fw::registry_put "$FW_NAME" "$FW_ROOT"
 }
 
 # fw::default_ref: the remote's default branch, as a local branch when one exists.
@@ -610,13 +663,7 @@ fw::start_worktree() {
   if fw::is_generated "$legacy"; then
     rm -f "$legacy"
   fi
-  # DDEV gitignores config.*.local.yaml once it writes .ddev/.gitignore. Exclude
-  # the file in Git too, so a checkout that never started stays clean.
-  mkdir -p "$FW_COMMON_DIR/info"
-  if ! grep -qxF "/.ddev/$FW_CONFIG_NAME" "$FW_COMMON_DIR/info/exclude" 2>/dev/null; then
-    printf '/.ddev/%s\n' "$FW_CONFIG_NAME" >>"$FW_COMMON_DIR/info/exclude"
-  fi
-  fw::registry_add "$FW_NAME" "$FW_ROOT"
+  fw::with_registry_lock fw::record_worktree || exit 1
   printf 'Configured DDEV project %s\n' "$FW_NAME"
 
   if [[ -n "$FW_PRIMARY_ROOT" && "$FW_ROOT" == "$FW_PRIMARY_ROOT"/* ]]; then

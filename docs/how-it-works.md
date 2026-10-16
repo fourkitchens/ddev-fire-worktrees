@@ -30,11 +30,12 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
   replaces a worktree's data. See [Choosing the database](databases.md).
 * **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
-* **Prune.** Startup records each worktree in `.git/fire-worktrees`. Prune deletes only recorded
-  projects whose checkout is gone. Without the checkout, `ddev delete` can't find add-on services'
-  volumes, such as Solr's, so prune also deletes every volume Docker Compose labelled with the
-  project. It lists, but never deletes, older worktree projects and leftover volumes that match
-  your prefix, since another clone may own them.
+* **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
+  (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
+  Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`
+  can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
+  Compose labelled with the project. It lists, but never deletes, older worktree projects and
+  leftover volumes that match your prefix, since another clone may own them.
 * **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
   they didn't write, or to remove a checkout with uncommitted work. They never delete branches.
 * **Portability.** The commands are Bash 3.2 scripts that read DDEV's YAML themselves, so they need
