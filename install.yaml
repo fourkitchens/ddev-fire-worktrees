@@ -8,6 +8,7 @@ ddev_version_constraint: '>= v1.25.4'
 project_files:
   - commands/host/fire-worktree-create
   - commands/host/fire-worktree-start
+  - commands/host/fire-worktree-refresh
   - commands/host/fire-worktree-info
   - commands/host/fire-worktree-list
   - commands/host/fire-worktree-remove

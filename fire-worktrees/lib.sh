@@ -399,6 +399,21 @@ fw::unlock() {
   trap - EXIT
 }
 
+# fw::confirm YES: ask before deleting data, unless YES is true. Exits unless
+# the answer is yes, and when no one is at the terminal to answer.
+fw::confirm() {
+  local answer
+  if [[ "$1" == true ]]; then
+    return 0
+  fi
+  [[ -t 0 ]] || fw::die 'Pass --yes to confirm when not running interactively.'
+  read -r -p 'Continue? [y/N] ' answer || answer=
+  if [[ "$answer" != [yY] && "$answer" != [yY][eE][sS] ]]; then
+    echo 'Cancelled.'
+    exit 1
+  fi
+}
+
 # Registry of worktrees this repository started, kept in the shared .git
 # directory so it outlives removed checkouts. One "<name><TAB><path>" per line.
 fw::registry_file() {
@@ -608,6 +623,17 @@ fw::db_source() {
   printf '%s\t%s' "${source:-unknown}" "$file"
 }
 
+# fw::db_created [DATE ARGS]: when FW_ROOT's database was created, formatted by
+# date, or nothing for a database created before startup recorded its source.
+# fw::record_db rewrites the record with each new database, so it's the record's
+# modification time.
+fw::db_created() {
+  local file
+  file=$(fw::db_record_file)
+  [[ -f "$file" ]] || return 0
+  date -r "$file" "$@"
+}
+
 # fw::is_dump FILE: true for a file ddev import-db reads, such as FIRE's
 # reference/site-db.sql.gz, rather than a ddev snapshot.
 fw::is_dump() {
@@ -764,6 +790,67 @@ fw::write_config() {
   fi
 }
 
+# fw::import_dump FILE: import the SQL dump FILE, if any, into FW_ROOT's new
+# database once its project is running.
+fw::import_dump() {
+  [[ -n "$1" ]] || return 0
+  printf 'Importing %s into the new database\n' "$1"
+  ddev import-db --file="$1" ||
+    fw::die "The worktree is running, but the import failed. Fix the error, then run: ddev import-db --file=$1"
+}
+
+# fw::build_after_copy BUILD: run FW_ROOT's build command so a copied database
+# matches the branch, or with BUILD false, print it. Fails when the build fails.
+fw::build_after_copy() {
+  local cmd status=0
+  cmd=$(fw::build_command "$FW_ROOT")
+  if [[ "$1" == true && "$cmd" != none ]]; then
+    printf '\nBuilding with: %s\n' "$cmd"
+    bash -c "$cmd" || status=1
+  elif [[ "$cmd" != none ]]; then
+    printf '\nSkipped the build. To run it: %s\n' "$cmd"
+  fi
+  if [[ -f "$FW_ROOT/fire.yml" && "$cmd" == 'ddev drush '* && -z "$(fw::setting "$FW_ROOT" WORKTREE_BUILD_COMMAND "")" ]]; then
+    printf "This project uses FIRE, and drush deploy doesn't build its theme. To build everything\n"
+    printf 'after each copy, set WORKTREE_BUILD_COMMAND=fire build --no-db-import (see the add-on README).\n'
+  fi
+  return "$status"
+}
+
+# fw::build_failed MODE: report FW_ROOT's failed build, once its URLs are
+# printed. With MODE fail it exits 1; with warn it returns, so an agent tool
+# carries on in the running site.
+fw::build_failed() {
+  local cmd
+  cmd=$(fw::build_command "$FW_ROOT")
+  if [[ "$1" == warn ]]; then
+    fw::warn "The worktree is running, but the build failed. Fix the error, then run: $cmd"
+    if [[ -n "${FW_START_LOG:-}" ]]; then
+      printf 'Startup log: %s\n' "$FW_START_LOG" >&2
+    fi
+  else
+    fw::die "The worktree is running, but the build failed. Fix the error, then run: $cmd"
+  fi
+}
+
+# fw::show_worktree EMPTY: print FW_NAME's URLs, then how to fill its database
+# when EMPTY is true, else a one-time login link for a Drupal site.
+fw::show_worktree() {
+  local url link
+  printf '\nWorktree URLs:\n'
+  fw::urls "$FW_ROOT" "$FW_NAME" | sed 's/^/  /'
+  if [[ "$1" == true ]]; then
+    printf 'To populate the database: %s\n' "$(fw::populate_hint "$FW_ROOT")"
+  elif fw::is_drupal "$FW_ROOT"; then
+    url="https://$FW_NAME.$(fw::tld "$FW_ROOT")"
+    if link=$(fw::login_link "$url"); then
+      printf 'One-time login link: %s\n' "$link"
+    else
+      fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+    fi
+  fi
+}
+
 # fw::start_worktree DIR DB BUILD: configure, start and build the linked worktree
 # that contains DIR, appending the output to its start log. DB is primary,
 # latest, fresh or a snapshot file; empty means the WORKTREE_DB setting. BUILD
@@ -800,7 +887,7 @@ fw::start_worktree() {
 
 # fw::start_steps DB BUILD: fw::start_worktree's work, in FW_ROOT.
 fw::start_steps() {
-  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' tld url link item cmd nested=false composer_root new_db=false on_failure build_failed=false
+  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' item nested=false composer_root new_db=false empty=false on_failure build_failed=false
   cfg=".ddev/$FW_CONFIG_NAME"
   legacy=.ddev/config.worktree.yaml
   if [[ (-e "$cfg" || -L "$cfg") ]] && ! fw::is_generated "$cfg"; then
@@ -887,51 +974,88 @@ fw::start_steps() {
     ddev start ${seed:+"--seed-snapshot=$seed"} || fw::die 'ddev start failed.'
   fi
   fw::unlock
-
-  if [[ -n "$dump" ]]; then
-    printf 'Importing %s into the new database\n' "$dump"
-    ddev import-db --file="$dump" ||
-      fw::die "The worktree is running, but the import failed. Fix the error, then run: ddev import-db --file=$dump"
-  fi
+  fw::import_dump "$dump"
 
   composer_root=$(fw::config_scalar "$FW_ROOT" composer_root)
   if [[ -f "${composer_root:-.}/composer.json" ]]; then
     ddev composer install || fw::die 'ddev composer install failed.'
   fi
 
-  tld=$(fw::tld "$FW_ROOT")
   if [[ -n "$seed" || -n "$dump" ]]; then
-    cmd=$(fw::build_command "$FW_ROOT")
-    if [[ "$build" == true && "$cmd" != none ]]; then
-      printf '\nBuilding with: %s\n' "$cmd"
-      bash -c "$cmd" || build_failed=true
-    elif [[ "$cmd" != none ]]; then
-      printf '\nSkipped the build. To run it: %s\n' "$cmd"
-    fi
-    if [[ -f fire.yml && "$cmd" == 'ddev drush '* && -z "$(fw::setting "$FW_ROOT" WORKTREE_BUILD_COMMAND "")" ]]; then
-      printf "This project uses FIRE, and drush deploy doesn't build its theme. To build everything\n"
-      printf 'after each copy, set WORKTREE_BUILD_COMMAND=fire build --no-db-import (see the add-on README).\n'
-    fi
+    fw::build_after_copy "$build" || build_failed=true
+  elif [[ "$new_db" == true ]]; then
+    empty=true
+  fi
+  fw::show_worktree "$empty"
+  if [[ "$build_failed" == true ]]; then
+    fw::build_failed "$on_failure"
+  fi
+}
+
+# fw::refresh_worktree DIR DB BUILD YES: replace the database of the started
+# worktree that contains DIR with a new one from DB, as a first start would, and
+# keep its project and other volumes. Asks first unless YES is true.
+fw::refresh_worktree() {
+  local db=$2 build=$3 primary what cmd on_failure seed='' dump='' empty=false build_failed=false
+  fw::context "$1"
+  if [[ "$FW_IS_PRIMARY" == true ]]; then
+    fw::die 'Run fire-worktree-refresh in a linked Git worktree, not the primary checkout.'
+  fi
+  cd "$FW_ROOT" || exit 1
+  # Without the generated config, DDEV gives this checkout the primary project's
+  # name, and a reset would delete the primary checkout's database.
+  FW_NAME=$(fw::generated_name "$FW_ROOT")
+  primary=$(fw::primary_name)
+  if [[ -n "$FW_NAME" && "$FW_NAME" == "$primary" ]]; then
+    fw::die "Refusing to replace the database of the primary DDEV project $primary."
+  fi
+  if [[ -z "$FW_NAME" ]] || ! fw::db_volume_exists "$FW_NAME"; then
+    fw::die 'This worktree has no database of its own yet. Run: ddev fire-worktree-start'
   fi
 
-  printf '\nWorktree URLs:\n'
-  fw::urls "$FW_ROOT" "$FW_NAME" | sed 's/^/  /'
-  if [[ "$new_db" == true && -z "$seed" && -z "$dump" ]]; then
-    printf 'To populate the database: %s\n' "$(fw::populate_hint "$FW_ROOT")"
-  elif fw::is_drupal "$FW_ROOT"; then
-    url="https://$FW_NAME.$tld"
-    if link=$(fw::login_link "$url"); then
-      printf 'One-time login link: %s\n' "$link"
-    else
-      fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
-    fi
+  db=${db:-$(fw::setting "$FW_ROOT" WORKTREE_DB primary)}
+  # Check settings before asking, and stop on errors even where set -e is off,
+  # since what follows deletes the database.
+  on_failure=$(fw::build_failure "$FW_ROOT") || exit 1
+  case $db in
+    primary) what="a new copy of the $primary database" ;;
+    latest) what="the last copy a worktree took of the $primary database" ;;
+    fresh) what='an empty database' ;;
+    *) what=$db ;;
+  esac
+  cmd=$(fw::build_command "$FW_ROOT")
+  echo 'This will:'
+  echo "  - Delete the database of DDEV project $FW_NAME. To keep a copy, cancel and run ddev snapshot."
+  echo "  - Replace it with $what. Other volumes, such as search indexes, are kept."
+  if [[ "$build" == true && "$cmd" != none && "$db" != fresh ]]; then
+    echo "  - Run $cmd."
   fi
+  fw::confirm "$4"
+
+  fw::lock
+  seed=$(fw::seed_snapshot "$db") || exit 1
+  if [[ -n "$seed" ]] && fw::is_dump "$seed"; then
+    dump=$seed
+    seed=
+  fi
+  fw::record_db "$db" "${seed:-$dump}"
+  if [[ -n "$seed" ]]; then
+    printf 'Seeding the new database from %s\n' "$seed"
+  fi
+  # Name the project rather than relying on the directory, which DDEV resolves
+  # to the primary project when a nested worktree isn't registered.
+  ddev start --reset-database --omit-snapshot --skip-confirmation ${seed:+"--seed-snapshot=$seed"} "$FW_NAME" ||
+    fw::die "ddev start failed, and the worktree's database may be empty. Fix the error, then run: ddev fire-worktree-refresh --db=$db"
+  fw::unlock
+  fw::import_dump "$dump"
+
+  if [[ -n "$seed" || -n "$dump" ]]; then
+    fw::build_after_copy "$build" || build_failed=true
+  else
+    empty=true
+  fi
+  fw::show_worktree "$empty"
   if [[ "$build_failed" == true ]]; then
-    if [[ "$on_failure" == warn ]]; then
-      fw::warn "The worktree is running, but the build failed. Fix the error, then run: $cmd"
-      printf 'Startup log: %s\n' "$FW_START_LOG" >&2
-    else
-      fw::die "The worktree is running, but the build failed. Fix the error, then run: $cmd"
-    fi
+    fw::build_failed "$on_failure"
   fi
 }

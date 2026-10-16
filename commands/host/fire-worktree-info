@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #ddev-generated
 
-## Description: Show this worktree's DDEV project, URLs, database source and a one-time login link
+## Description: Show this worktree's DDEV project, URLs, database source and age, and a one-time login link
 ## Usage: fire-worktree-info [--json]
 ## Example: ddev fire-worktree-info\nddev fire-worktree-info --json
 ## Flags: [{"Name":"json","Usage":"Print JSON, for scripts and agents"}]
@@ -19,8 +19,9 @@ case ${1:-} in
   --json | -j | --json-output) json=true ;;
   -h | --help)
     echo "$usage"
-    echo "Shows the DDEV project, status, URLs and database source of the worktree you are"
-    echo 'in. For a running Drupal site, it also creates a one-time login link.'
+    echo 'Shows the DDEV project, status and URLs of the worktree you are in, and where and'
+    echo 'when its database was copied. For a running Drupal site, it also creates a one-time'
+    echo 'login link.'
     exit 0
     ;;
   *) fw::die "$usage" ;;
@@ -55,7 +56,8 @@ if [[ "$json" == true ]]; then
     printf '%s%s' "$sep" "$(fw::json "$u")"
     sep=', '
   done <<<"$urls"
-  printf '],\n  "database": {"source": %s, "file": %s},\n' "$(fw::json "$db_source")" "$(fw::json "$db_file")"
+  printf '],\n  "database": {"source": %s, "file": %s, "created": %s},\n' "$(fw::json "$db_source")" "$(fw::json "$db_file")" \
+    "$(fw::json "$(fw::db_created -u +%Y-%m-%dT%H:%M:%SZ)")"
   printf '  "login_url": %s\n}\n' "$(fw::json "$login")"
   exit 0
 fi
@@ -73,6 +75,10 @@ while IFS= read -r u; do
   label=
 done <<<"$urls"
 printf 'Database:  %s\n' "$db_text"
+created=$(fw::db_created '+%Y-%m-%d %H:%M')
+if [[ -n "$created" ]]; then
+  printf '           created %s\n' "$created"
+fi
 if [[ -n "$login" ]]; then
   printf 'Login:     %s\n' "$login"
 elif fw::is_drupal "$FW_ROOT" && [[ "$status" != running ]]; then

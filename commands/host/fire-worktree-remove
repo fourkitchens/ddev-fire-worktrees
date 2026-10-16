@@ -79,14 +79,7 @@ if [[ "$keep_checkout" == false ]]; then
   echo "  - Remove the checkout at $FW_ROOT."
   echo "  - Keep branch ${branch:-(detached HEAD)}."
 fi
-if [[ "$yes" == false ]]; then
-  [[ -t 0 ]] || fw::die 'Pass --yes to confirm when not running interactively.'
-  read -r -p 'Continue? [y/N] ' answer || answer=
-  if [[ "$answer" != [yY] && "$answer" != [yY][eE][sS] ]]; then
-    echo 'Cancelled.'
-    exit 1
-  fi
-fi
+fw::confirm "$yes"
 
 if [[ "$has_project" == true ]]; then
   fw::delete_project "$name"
