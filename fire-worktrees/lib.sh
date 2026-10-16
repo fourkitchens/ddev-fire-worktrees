@@ -446,14 +446,24 @@ fw::is_dump() {
   return 1
 }
 
+# fw::has_site_build DIR: true when DIR has ddev-fire's site-build command and
+# DDEV offers it for DIR's project type.
+fw::has_site_build() {
+  local file="$1/.ddev/commands/host/site-build" types
+  [[ -f "$file" && -f "$1/.ddev/fire/scripts/lib.sh" ]] || return 1
+  types=$(sed -n 's/^## ProjectTypes:[[:space:]]*//p' "$file" | tr -d ' \t\r')
+  [[ -z "$types" || ",$types," == *",$(fw::config_scalar "$1" type),"* ]]
+}
+
 # fw::build_command DIR: the command that finishes a worktree after its database
 # is copied in, or "none".
 fw::build_command() {
   local cmd
   cmd=$(fw::setting "$1" WORKTREE_BUILD_COMMAND "")
   if [[ -z "$cmd" ]]; then
-    if [[ -f "$1/.ddev/commands/host/fire-build" ]]; then
-      cmd='ddev fire-build --no-db-import'
+    # --skip-db-import also skips the database download.
+    if fw::has_site_build "$1"; then
+      cmd='ddev site-build --skip-db-import'
     else
       case $(fw::config_scalar "$1" type) in
         # drush deploy needs Drupal 8.8 or later.
@@ -468,8 +478,8 @@ fw::build_command() {
 
 # fw::populate_hint DIR: how to fill an empty database.
 fw::populate_hint() {
-  if [[ -f "$1/.ddev/commands/host/fire-build" ]]; then
-    echo 'ddev fire-build'
+  if fw::has_site_build "$1"; then
+    echo 'ddev site-build'
   elif [[ -f "$1/fire.yml" ]]; then
     echo 'fire build'
   else
