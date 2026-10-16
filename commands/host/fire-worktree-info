@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Show this worktree's DDEV project, URLs, database source and a one-time login link
+## Usage: fire-worktree-info [--json]
+## Example: ddev fire-worktree-info\nddev fire-worktree-info --json
+## Flags: [{"Name":"json","Usage":"Print JSON, for scripts and agents"}]
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+usage='Usage: ddev fire-worktree-info [--json]'
+json=false
+case ${1:-} in
+  '') ;;
+  # DDEV's global -j/--json-output reaches the command too.
+  --json | -j | --json-output) json=true ;;
+  -h | --help)
+    echo "$usage"
+    echo "Shows the DDEV project, status, URLs and database source of the worktree you are"
+    echo 'in. For a running Drupal site, it also creates a one-time login link.'
+    exit 0
+    ;;
+  *) fw::die "$usage" ;;
+esac
+[[ $# -le 1 ]] || fw::die "$usage"
+
+# Use the caller's directory rather than DDEV_APPROOT, which points at the
+# primary project when this worktree is nested inside it.
+fw::context "$PWD"
+if [[ "$FW_IS_PRIMARY" == true ]]; then
+  fw::die "$FW_ROOT is the primary checkout. Run fire-worktree-info in a linked worktree, or use ddev describe."
+fi
+cd "$FW_ROOT"
+if ! fw::is_generated ".ddev/$FW_CONFIG_NAME"; then
+  fw::die 'This worktree has no DDEV project of its own yet. Run: ddev fire-worktree-start'
+fi
+name=$(fw::yaml_scalar ".ddev/$FW_CONFIG_NAME" name)
+status=$(fw::status "$name" "$(fw::running_containers)")
+urls=$(fw::urls "$FW_ROOT" "$name")
+url="https://$name.$(fw::tld "$FW_ROOT")"
+IFS=$'\t' read -r db_source db_file <<<"$(fw::db_source)"
+
+login=
+if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
+  login=$(fw::login_link "$url") || fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+fi
+
+if [[ "$json" == true ]]; then
+  printf '{\n  "name": %s,\n  "status": %s,\n  "urls": [' "$(fw::json "$name")" "$(fw::json "$status")"
+  sep=
+  while IFS= read -r u; do
+    printf '%s%s' "$sep" "$(fw::json "$u")"
+    sep=', '
+  done <<<"$urls"
+  printf '],\n  "database": {"source": %s, "file": %s},\n' "$(fw::json "$db_source")" "$(fw::json "$db_file")"
+  printf '  "login_url": %s\n}\n' "$(fw::json "$login")"
+  exit 0
+fi
+
+case $db_source in
+  fresh) db_text='empty (--db=fresh)' ;;
+  primary | latest) db_text="$db_file (--db=$db_source)" ;;
+  unknown) db_text='unknown; it was created before startup recorded its source' ;;
+  *) db_text=$db_file ;;
+esac
+printf 'Project:   %s (%s)\n' "$name" "$status"
+label=URLs:
+while IFS= read -r u; do
+  printf '%-10s %s\n' "$label" "$u"
+  label=
+done <<<"$urls"
+printf 'Database:  %s\n' "$db_text"
+if [[ -n "$login" ]]; then
+  printf 'Login:     %s\n' "$login"
+elif fw::is_drupal "$FW_ROOT" && [[ "$status" != running ]]; then
+  printf 'Login:     start the project with ddev start, then rerun this command\n'
+fi

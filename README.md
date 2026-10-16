@@ -20,6 +20,7 @@ but neither add-on needs the other.
 ddev fire-worktree-create ABC-123-hero   # new branch and checkout, its own site, a copy of your database
 ddev fire-worktree-create --pr=123       # a pull request's branch, to review it in its own site
 ddev fire-worktree-list                  # every worktree, its status and URL
+ddev fire-worktree-info                  # in a worktree: its URLs, database source and a login link
 ddev fire-worktree-remove                # in a worktree: delete its site and checkout, keep the branch
 ```
 
@@ -50,10 +51,11 @@ which this add-on provides as an alias.
 | `ddev fire-worktree-create <branch> [start-point]` | `worktree-create` | Checks out a new or existing branch in a directory beside your main checkout, such as `../mysite-abc-123-hero`, then runs startup there. `--pr=<number>` checks out a pull request instead. |
 | `ddev fire-worktree-start` | `worktree-start` | Gives the worktree you're in its own DDEV project, copies the database into it, and builds it. Safe to rerun. |
 | `ddev fire-worktree-list` | | Lists every worktree with its branch, DDEV project, status, uncommitted changes and URL. |
+| `ddev fire-worktree-info [--json]` | | Shows the worktree's DDEV project, status, URLs and database source, and for a running Drupal site, a one-time login link. `--json` is for scripts and agents. |
 | `ddev fire-worktree-remove [--yes] [--keep-checkout] [path]` | `worktree-remove` | Deletes the worktree's DDEV project and database, then removes the checkout. Keeps the branch. |
 | `ddev fire-worktree-prune [--yes]` | | Finds DDEV projects whose checkout is gone, for example after a tool deletes a worktree. Deletes them with `--yes`. |
 
-Run `create`, `list` and `prune` from any checkout of the repository. Run `start` inside a worktree.
+Run `create`, `list` and `prune` from any checkout of the repository. Run `start` and `info` inside a worktree.
 Run `remove` inside a worktree, or pass its path. Every command accepts `--help`.
 
 `create` checks out a branch you or origin already have, and starts a new one from

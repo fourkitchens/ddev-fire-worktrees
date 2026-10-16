@@ -8,6 +8,26 @@ A worktree inside your main checkout, such as Claude Code's `.claude/worktrees/`
 sibling directories are better: if your main project uses Mutagen, it syncs a nested worktree into
 its own container.
 
+## Login links and worktree details
+
+For a Drupal site, startup ends with a one-time login link to the worktree. Later, run
+`ddev fire-worktree-info --json` in the worktree for its project name, status, URLs, database source
+and a new login link:
+
+```json
+{
+  "name": "mysite-abc-123-hero-1234567890",
+  "status": "running",
+  "urls": ["https://mysite-abc-123-hero-1234567890.ddev.site"],
+  "database": {"source": "primary", "file": "/path/to/mysite/.ddev/db_snapshots/fire-worktree-seed-20261016093000-mariadb_10.11.gz"},
+  "login_url": "https://mysite-abc-123-hero-1234567890.ddev.site/user/reset/1/1760610000/abc/login"
+}
+```
+
+`database.source` is the `--db` the worktree started with: `primary`, `latest`, `fresh`, `snapshot`
+or `dump`, or `unknown` for a worktree started before this was recorded. `login_url` is `null` when
+the project isn't running or isn't Drupal.
+
 ## T3
 
 For [T3](https://t3.codes), add these actions to the project's `t3.json`:

@@ -137,6 +137,13 @@ worktree_name() {
   assert_output "2"
   assert_file_not_exists "${WT}/web/built.txt"
 
+  run ddev fire-worktree-info
+  assert_success
+  assert_line "Project:   ${NAME} (running)"
+  assert_line "           https://sub.${NAME}.ddev.site"
+  assert_line --regexp "^Database:  ${PRIMARY}/\.ddev/db_snapshots/fire-worktree-seed-[^ ]+ \(--db=primary\)\$"
+  refute_output --partial "Login"
+
   run ddev fire-worktree-list
   assert_success
   assert_output --partial "main (primary)"
@@ -309,8 +316,9 @@ SH
 @test "a standard Drupal site needs no settings: the worktree copies the database and runs drush deploy" {
   set -eu -o pipefail
   # One Drupal site, no extra hostnames and no WORKTREE_* settings, like most projects.
+  # Some pin Drush's URI to the primary site, which every worktree inherits.
   rm -rf web .gitignore
-  printf 'name: %s\ntype: drupal11\ndocroot: web\n' "${PROJNAME}" >.ddev/config.yaml
+  printf 'name: %s\ntype: drupal11\ndocroot: web\nweb_environment:\n  - DRUSH_OPTIONS_URI=https://%s.ddev.site\n' "${PROJNAME}" "${PROJNAME}" >.ddev/config.yaml
   run ddev add-on get "${DIR}"
   assert_success
   run ddev start -y
@@ -339,8 +347,14 @@ SH
   run ddev fire-worktree-create feature/drupal
   assert_success
   assert_output --partial "Building with: ddev drush deploy -y"
+  assert_output --partial "inherits DRUSH_OPTIONS_URI=https://${PROJNAME}.ddev.site from web_environment"
   WT="${TESTDIR}/primary-feature-drupal"
   NAME=$(worktree_name "${WT}")
+  # The login link is the worktree's, despite DRUSH_OPTIONS_URI, and logs in.
+  assert_line --regexp "^One-time login link: https://${NAME}\.ddev\.site/user/reset/1/"
+  link=$(printf '%s\n' "${output}" | sed -n 's/^One-time login link: https:/http:/p')
+  run curl -s -o /dev/null -w '%{url_effective}' -L "${link}"
+  assert_output --regexp "^http://${NAME}\.ddev\.site/user/1/edit"
   run grep -x 'additional_hostnames: \[\]' "${WT}/.ddev/config.worktree.local.yaml"
   assert_success
 
@@ -354,6 +368,13 @@ SH
   assert_output --partial "Branch config"
   run git status --porcelain
   assert_output ""
+
+  run ddev fire-worktree-info --json
+  assert_success
+  assert_line "  \"name\": \"${NAME}\","
+  assert_line '  "status": "running",'
+  assert_line --regexp "^  \"database\": \\{\"source\": \"primary\", \"file\": \"${PRIMARY}/\\.ddev/db_snapshots/fire-worktree-seed-[^\"]+\"\\},\$"
+  assert_line --regexp "^  \"login_url\": \"https://${NAME}\\.ddev\\.site/user/reset/1/[^\"]+\"\$"
 
   cd "${PRIMARY}"
   run ddev drush config:get system.site name --format=string

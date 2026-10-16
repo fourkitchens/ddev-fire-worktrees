@@ -21,7 +21,7 @@ case ${1:-} in
 esac
 
 fw::context "$PWD"
-running=$(docker ps --filter label=com.ddev.site-name --format '{{.Names}}' 2>/dev/null || true)
+running=$(fw::running_containers)
 
 # fw_row PATH BRANCH: print one tab-separated row.
 fw_row() {
@@ -39,13 +39,7 @@ fw_row() {
   fi
   if [[ -n "$name" ]]; then
     url="https://$name.$(fw::tld "$path")"
-    if printf '%s\n' "$running" | grep -qx "ddev-$name-web"; then
-      status=running
-    elif fw::db_volume_exists "$name"; then
-      status=stopped
-    else
-      status='not started'
-    fi
+    status=$(fw::status "$name" "$running")
   elif [[ "$status" == - ]]; then
     status='no environment'
   fi

@@ -91,6 +91,7 @@ fi
 if [[ "$has_project" == true ]]; then
   fw::delete_project "$name"
 fi
+rm -f "$(fw::db_record_file)"
 if [[ -n "$name" ]]; then
   fw::registry_remove "$name"
 fi
