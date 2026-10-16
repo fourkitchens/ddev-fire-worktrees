@@ -32,20 +32,24 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.
-* **Database.** DDEV seeds a database only when it creates the database volume, so a copy never
-  replaces a worktree's data. Startup notes where the database came from in the worktree's Git
-  directory, as `fire-worktree-db`, for `ddev fire-worktree-info`. See
-  [Choosing the database](databases.md).
-* **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`.
+* **Database.** DDEV seeds a database only when it creates the database volume, so startup never
+  replaces a worktree's data. `ddev fire-worktree-refresh` does, after asking: it runs
+  `ddev start --reset-database` with the worktree's project name, which deletes only the database
+  volume, and seeds a new one. Both note where the database came from in the worktree's Git
+  directory, as `fire-worktree-db`, for `ddev fire-worktree-info`. The file's modification time is
+  when the database was created. See [Choosing the database](databases.md).
+* **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`,
+  including when they refresh.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
   Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`
   can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
   Compose labelled with the project. It lists, but never deletes, older worktree projects and
   leftover volumes that match your prefix, since another clone may own them.
-* **Safety.** The commands refuse to run startup in the main checkout, to overwrite a config file
-  they didn't write, or to remove a checkout with uncommitted work. They never delete branches.
-  `create` moves an existing branch only to fast-forward a pull request's branch that tracks the
-  pull request.
+* **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
+  worktree before its first start, when DDEV would treat it as your main project, to overwrite a
+  config file they didn't write, or to remove a checkout with uncommitted work. They never delete
+  branches. `create` moves an existing branch only to fast-forward a pull request's branch that
+  tracks the pull request.
 * **Portability.** The commands are Bash 3.2 scripts that read DDEV's YAML themselves, so they need
   no `jq`, `yq` or Python.

@@ -251,6 +251,74 @@ EOF
   assert_line "    ddev-fwtest-gone-1_solr"
 }
 
+@test "refresh gives a worktree a new copy of the database and keeps its other volumes" {
+  set -eu -o pipefail
+  # An add-on service with a named volume, such as a search index.
+  cat >.ddev/docker-compose.cache.yaml <<'EOF'
+services:
+  cache:
+    container_name: ddev-${DDEV_SITENAME}-cache
+    image: busybox:stable
+    command: sleep infinity
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: ${DDEV_APPROOT}
+    volumes:
+      - cache:/data
+volumes:
+  cache:
+EOF
+  install_and_start "${DIR}"
+  run ddev fire-worktree-create feature/refresh
+  assert_success
+  WT="${TESTDIR}/primary-feature-refresh"
+  NAME=$(worktree_name "${WT}")
+
+  # The worktree has its own data, and the primary moves on.
+  cd "${WT}"
+  ddev mysql -e "INSERT INTO marker VALUES ('worktree-only')"
+  docker exec "ddev-${NAME}-cache" touch /data/index
+  ddev exec rm /var/www/html/web/built.txt
+  (cd "${PRIMARY}" && ddev mysql -e "UPDATE marker SET v = 'primary-later'")
+
+  run ddev fire-worktree-refresh
+  assert_failure
+  assert_output --partial "Pass --yes"
+  run ddev fire-worktree-refresh --yes
+  assert_success
+  assert_output --partial "Seeding the new database from ${PRIMARY}/.ddev/db_snapshots/fire-worktree-seed-"
+  run ddev mysql -N -e 'SELECT v FROM marker'
+  assert_output "primary-later"
+  # The build ran. Check in the container, since Mutagen syncs to the checkout later.
+  run ddev exec test -f /var/www/html/web/built.txt
+  assert_success
+  run docker exec "ddev-${NAME}-cache" ls /data/index
+  assert_success
+  # Neither the replaced database nor older copies are kept as snapshots.
+  run bash -c "ls '${WT}/.ddev/db_snapshots' 2>/dev/null | wc -l | tr -d ' '"
+  assert_output "0"
+  run bash -c "ls '${PRIMARY}/.ddev/db_snapshots' | grep -c '^fire-worktree-seed-'"
+  assert_output "1"
+  run ddev fire-worktree-info
+  assert_line --regexp '^           created [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+  run curl -sf "http://${NAME}.ddev.site"
+  assert_output "ok"
+
+  # A SQL dump replaces the database the same way, and the primary keeps its data.
+  ddev mysql -e "CREATE TABLE extra (v INT)"
+  run bash -c "cd '${PRIMARY}' && ddev export-db --file='${TESTDIR}/site-db.sql.gz'"
+  assert_success
+  run ddev fire-worktree-refresh --db="${TESTDIR}/site-db.sql.gz" --no-build --yes
+  assert_success
+  assert_output --partial "Importing ${TESTDIR}/site-db.sql.gz into the new database"
+  run ddev mysql -N -e 'SHOW TABLES'
+  assert_output "marker"
+  cd "${PRIMARY}"
+  run ddev mysql -N -e 'SELECT v FROM marker'
+  assert_output "primary-later"
+  health_checks
+}
+
 @test "keeps legacy worktree names, handles nested worktrees, and refuses the primary" {
   set -eu -o pipefail
   install_and_start "${DIR}"
@@ -464,7 +532,7 @@ SH
   assert_success
   assert_line "  \"name\": \"${NAME}\","
   assert_line '  "status": "running",'
-  assert_line --regexp "^  \"database\": \\{\"source\": \"primary\", \"file\": \"${PRIMARY}/\\.ddev/db_snapshots/fire-worktree-seed-[^\"]+\"\\},\$"
+  assert_line --regexp "^  \"database\": \\{\"source\": \"primary\", \"file\": \"${PRIMARY}/\\.ddev/db_snapshots/fire-worktree-seed-[^\"]+\", \"created\": \"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\"\\},\$"
   assert_line --regexp "^  \"login_url\": \"https://${NAME}\\.ddev\\.site/user/reset/1/[^\"]+\"\$"
 
   cd "${PRIMARY}"

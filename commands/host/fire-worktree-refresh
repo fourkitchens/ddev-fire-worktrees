@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Replace this Git worktree's database with a new copy, keeping its DDEV project and other volumes, then build it
+## Usage: fire-worktree-refresh [--db=primary|latest|fresh|<snapshot or dump>] [--no-build] [--yes]
+## Example: ddev fire-worktree-refresh\nddev fire-worktree-refresh --db=latest --yes
+## Flags: [{"Name":"db","Type":"string","Usage":"Database to copy in: primary (snapshot the primary checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"},{"Name":"yes","Shorthand":"y","Usage":"Skip the confirmation prompt"}]
+
+set -euo pipefail
+
+# shellcheck source=fire-worktrees/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
+
+usage='Usage: ddev fire-worktree-refresh [--db=primary|latest|fresh|<snapshot or dump>] [--no-build] [--yes]'
+db=
+build=true
+yes=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h | --help)
+      echo "$usage"
+      echo 'Replaces the database of the worktree you are in with a new copy, as its first'
+      echo 'start did, then builds it. Keeps its DDEV project and other volumes.'
+      exit 0
+      ;;
+    --db=*) db=${1#--db=} ;;
+    --db)
+      [[ $# -ge 2 ]] || fw::die "$usage"
+      db=$2
+      shift
+      ;;
+    --no-build) build=false ;;
+    -y | --yes) yes=true ;;
+    *) fw::die "$usage" ;;
+  esac
+  shift
+done
+
+# Host commands run in the caller's directory. Use it rather than DDEV_APPROOT,
+# which points at the primary project when this worktree is nested inside it.
+db=$(fw::db_arg "$db")
+fw::refresh_worktree "$PWD" "$db" "$build" "$yes"

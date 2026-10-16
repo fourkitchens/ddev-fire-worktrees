@@ -78,8 +78,9 @@ web_environment:
 
 In a multisite that runs one site at a time in the `db` database, such as one built with
 `fire build --site-name=<site>`, the copy holds whichever site your main checkout runs. Switch a
-worktree to another site with `--db=fresh` and `fire build --site-name=<site>`. In a multisite with
-a database per site, make the build command run `drush deploy` for each site.
+worktree to another site with `ddev fire-worktree-refresh --db=fresh`, then
+`fire build --site-name=<site>`. In a multisite with a database per site, make the build command run
+`drush deploy` for each site.
 
 ## Search
 
@@ -96,6 +97,10 @@ ddev drush search-api:index
 
 `ddev drush search-api:clear` works too, and also deletes what the server holds. Search API's
 Database backend keeps its index in the site's database, so a copy already has it.
+
+`ddev fire-worktree-refresh` keeps the worktree's search server, which still holds items from the
+database it replaced. After a refresh, use `search-api:clear` rather than `reset-tracker`, so
+deleted content doesn't stay in results.
 
 A new search server has only what its add-on creates when it starts, so a core, collection or index
 you added later is missing. With [`ddev/ddev-solr`](https://github.com/ddev/ddev-solr), commit your
