@@ -113,12 +113,21 @@ EOF
   run fw::build_command "${SITE}"
   assert_output "none"
 
-  # ddev-fire, when installed, builds the site.
+  # ddev-fire, when installed, builds the site. A project's own site-build
+  # command isn't ddev-fire's.
   printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
-  mkdir -p "${SITE}/.ddev/commands/host"
-  touch "${SITE}/.ddev/commands/host/fire-build"
+  mkdir -p "${SITE}/.ddev/commands/host" "${SITE}/.ddev/fire/scripts"
+  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal, drupal10, drupal11\n' >"${SITE}/.ddev/commands/host/site-build"
   run fw::build_command "${SITE}"
-  assert_output "ddev fire-build --no-db-import"
+  assert_output "ddev drush deploy -y"
+  touch "${SITE}/.ddev/fire/scripts/lib.sh"
+  run fw::build_command "${SITE}"
+  assert_output "ddev site-build --skip-db-import"
+
+  # DDEV hides site-build from project types it doesn't list.
+  printf 'type: drupal7\n' >"${SITE}/.ddev/config.yaml"
+  run fw::build_command "${SITE}"
+  assert_output "ddev drush updb -y"
 
   # The project setting wins, and a developer can override it locally.
   printf 'type: drupal11\nweb_environment:\n  - WORKTREE_BUILD_COMMAND=fire build --no-db-import\n' >"${SITE}/.ddev/config.yaml"
@@ -127,6 +136,20 @@ EOF
   printf 'web_environment: [WORKTREE_BUILD_COMMAND=none]\n' >"${SITE}/.ddev/config.local.yaml"
   run fw::build_command "${SITE}"
   assert_output "none"
+}
+
+@test "suggests how to fill an empty database" {
+  printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
+  run fw::populate_hint "${SITE}"
+  assert_output "ddev import-db --file=<dump>, or ddev pull <provider>"
+  touch "${SITE}/fire.yml"
+  run fw::populate_hint "${SITE}"
+  assert_output "fire build"
+  mkdir -p "${SITE}/.ddev/commands/host" "${SITE}/.ddev/fire/scripts"
+  printf '#!/usr/bin/env bash\n## ProjectTypes: drupal, drupal10, drupal11\n' >"${SITE}/.ddev/commands/host/site-build"
+  touch "${SITE}/.ddev/fire/scripts/lib.sh"
+  run fw::populate_hint "${SITE}"
+  assert_output "ddev site-build"
 }
 
 @test "names the primary project from the primary checkout" {
@@ -154,6 +177,61 @@ EOF
   assert_failure
 }
 
+# snapshot_dirs: a primary checkout with a db_snapshots directory, and a
+# worktree on the same database server.
+snapshot_dirs() {
+  FW_PRIMARY_ROOT="${SITE}"
+  FW_ROOT="${TESTDIR}/site-feature-x"
+  SNAPS="${SITE}/.ddev/db_snapshots"
+  mkdir -p "${SNAPS}" "${FW_ROOT}/.ddev"
+  printf 'name: mysite\ndatabase:\n  type: mariadb\n  version: "10.11"\n' >"${SITE}/.ddev/config.yaml"
+  cp "${SITE}/.ddev/config.yaml" "${FW_ROOT}/.ddev/config.yaml"
+}
+
+@test "--db=latest reuses the last worktree copy, not a newer snapshot taken by hand" {
+  snapshot_dirs
+  touch -t 202610010000 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  run fw::seed_snapshot latest
+  assert_success
+  assert_output "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+}
+
+@test "--db=latest falls back to another snapshot, and names it" {
+  snapshot_dirs
+  touch -t 202610010000 "${SNAPS}/old-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  # A seed snapshot for another database server doesn't count.
+  touch -t 202610030000 "${SNAPS}/fire-worktree-seed-20261003000000-mysql_8.0.gz"
+  touch -t 202610040000 "${SNAPS}/newer-mysql_8.0.gz"
+  run fw::seed_snapshot latest
+  assert_success
+  assert_output --partial "No earlier worktree copy to reuse, so using the snapshot before-experiment-mariadb_10.11.gz."
+  assert_line --index 1 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+
+  rm -f "${SNAPS}"/*mariadb*
+  run fw::seed_snapshot latest
+  assert_failure
+  assert_output --partial "no database snapshot to copy"
+}
+
+@test "--db=primary falls back to the last worktree copy when it can't snapshot" {
+  snapshot_dirs
+  ddev() { return 1; }
+  touch -t 202610010000 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+  touch -t 202610020000 "${SNAPS}/before-experiment-mariadb_10.11.gz"
+  run fw::seed_snapshot primary
+  assert_success
+  assert_output --partial "Couldn't snapshot mysite."
+  assert_output --partial "Using the older snapshot fire-worktree-seed-20261001000000-mariadb_10.11.gz instead."
+  assert_line --index 3 "${SNAPS}/fire-worktree-seed-20261001000000-mariadb_10.11.gz"
+
+  rm -f "${SNAPS}"/fire-worktree-seed-*
+  run fw::seed_snapshot primary
+  assert_success
+  assert_output --partial "Using the older snapshot before-experiment-mariadb_10.11.gz instead."
+}
+
 @test "makes DNS-safe slugs" {
   run fw::slug "Feature/ABC-123_Hero Banner" 80
   assert_output "feature-abc-123-hero-banner"
@@ -161,6 +239,13 @@ EOF
   assert_output "a-longer-pro"
   run fw::slug "abcdefghijk-xyz" 12
   assert_output "abcdefghijk"
+}
+
+@test "names the Compose project whose label marks a project's volumes" {
+  run fw::compose_project "fwtest-feature-one-123"
+  assert_output "ddev-fwtest-feature-one-123"
+  run fw::compose_project "My.Site"
+  assert_output "ddev-mysite"
 }
 
 @test "resolves a --db file from the caller's directory" {
@@ -179,12 +264,12 @@ EOF
 @test "the first start honors the config.local.yaml it copies in" {
   # The team's settings, committed.
   cat >"${SITE}/.ddev/config.yaml" <<'YAML'
-name: widener
+name: mysite
 type: php
 additional_hostnames:
-    - alumni.widener
+    - alumni.mysite
 web_environment:
-    - WORKTREE_NAME_PREFIX=wid
+    - WORKTREE_NAME_PREFIX=team
 YAML
   printf '/.ddev/config.local.yaml\n/notes.txt\n' >"${SITE}/.gitignore"
   git_site
@@ -195,7 +280,7 @@ web_environment:
     - WORKTREE_NAME_PREFIX=zz
     - WORKTREE_COPY_FILES=.ddev/config.local.yaml notes.txt
 additional_hostnames:
-    - extra.widener
+    - extra.mysite
 YAML
   echo notes >"${SITE}/notes.txt"
 

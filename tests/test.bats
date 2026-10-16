@@ -165,6 +165,21 @@ worktree_name() {
 
 @test "imports a SQL dump, and prune deletes projects whose checkout is gone" {
   set -eu -o pipefail
+  # An add-on service with a named volume, as ddev-solr and ddev-redis have.
+  cat >.ddev/docker-compose.cache.yaml <<'EOF'
+services:
+  cache:
+    container_name: ddev-${DDEV_SITENAME}-cache
+    image: busybox:stable
+    command: sleep infinity
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: ${DDEV_APPROOT}
+    volumes:
+      - cache:/data
+volumes:
+  cache:
+EOF
   install_and_start "${DIR}"
 
   # A dump such as FIRE's reference/site-db.sql.gz, given relative to the caller.
@@ -192,12 +207,26 @@ worktree_name() {
   assert_success
   assert_output --partial "${NAME}"
   assert_output --partial "Dry run"
+  # Without the checkout, ddev delete alone would leave the service's volume.
+  run docker volume inspect "ddev-${NAME}_cache"
+  assert_success
   run ddev fire-worktree-prune --yes
   assert_success
+  assert_output --partial "Deleted volume ddev-${NAME}_cache"
   run docker volume inspect "${NAME}-mariadb"
   assert_failure
+  run docker volume ls -q --filter "label=com.docker.compose.project=ddev-${NAME}"
+  assert_output ""
   run ddev fire-worktree-prune
   assert_output --partial "No DDEV projects to prune."
+
+  # Volumes an earlier prune left behind are listed, never deleted.
+  docker volume create --label com.docker.compose.project=ddev-fwtest-gone-1 ddev-fwtest-gone-1_solr >/dev/null
+  run ddev fire-worktree-prune --yes
+  docker volume rm ddev-fwtest-gone-1_solr >/dev/null
+  assert_success
+  assert_line "  fwtest-gone-1"
+  assert_line "    ddev-fwtest-gone-1_solr"
 }
 
 @test "keeps legacy worktree names, handles nested worktrees, and refuses the primary" {

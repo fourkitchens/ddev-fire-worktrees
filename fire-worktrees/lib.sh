@@ -270,6 +270,38 @@ fw::db_volume_exists() {
   docker volume ls -q 2>/dev/null | grep -Eq "^$1-(mariadb|mysql|postgres)\$"
 }
 
+# fw::compose_project NAME: the Docker Compose project DDEV runs NAME as.
+fw::compose_project() {
+  printf 'ddev-%s' "$1" | tr -d . | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
+# fw::project_volumes NAME: the volumes Docker Compose created for NAME, which
+# include the database and add-on services such as Solr and Redis.
+fw::project_volumes() {
+  docker volume ls -q --filter "label=com.docker.compose.project=$(fw::compose_project "$1")" 2>/dev/null || true
+}
+
+# fw::has_environment NAME: true while DDEV knows NAME or any of its volumes remain.
+fw::has_environment() {
+  ddev describe "$1" >/dev/null 2>&1 || fw::db_volume_exists "$1" || [[ -n "$(fw::project_volumes "$1")" ]]
+}
+
+# fw::delete_project NAME: delete NAME's DDEV project and every volume it left.
+# Once the checkout is gone, DDEV can't read the compose file that lists add-on
+# services' volumes, so ddev delete leaves them.
+fw::delete_project() {
+  local volume
+  ddev delete --omit-snapshot --yes "$1"
+  while IFS= read -r volume; do
+    [[ -n "$volume" ]] || continue
+    if docker volume rm "$volume" >/dev/null; then
+      printf 'Deleted volume %s\n' "$volume"
+    else
+      fw::warn "Couldn't delete volume $volume."
+    fi
+  done < <(fw::project_volumes "$1")
+}
+
 # fw::try_lock DIR: take the lock at DIR, clearing one left by a process that
 # has exited. Fails while a running process holds it.
 fw::try_lock() {
@@ -384,7 +416,7 @@ fw::default_ref() {
 # fw::seed_snapshot MODE: print the snapshot file to seed a new database from,
 # or nothing for a fresh database.
 fw::seed_snapshot() {
-  local mode=$1 dir primary snap f newest='' type version
+  local mode=$1 dir primary snap f newest='' other='' type version
   case $mode in
     fresh)
       return 0
@@ -412,7 +444,8 @@ fw::seed_snapshot() {
         fi
       fi
       if [[ -z "$newest" ]]; then
-        # The newest snapshot that matches this worktree's database server.
+        # The newest seed snapshot that matches this worktree's database server,
+        # else the newest other snapshot that does, such as one taken by hand.
         type=$(fw::config_nested "$FW_ROOT" database type)
         version=$(fw::config_nested "$FW_ROOT" database version)
         while IFS= read -r f; do
@@ -420,15 +453,21 @@ fw::seed_snapshot() {
           if [[ -n "$type" && -n "$version" && "$f" != *"-${type}_${version}."* ]]; then
             continue
           fi
-          newest="$dir/$f"
-          break
+          if [[ "$f" == "$FW_SEED_PREFIX"-* ]]; then
+            newest="$dir/$f"
+            break
+          fi
+          other=${other:-"$dir/$f"}
         done < <(ls -t "$dir" 2>/dev/null)
-        if [[ -z "$newest" ]]; then
+        if [[ -z "$newest" && -z "$other" ]]; then
           fw::die "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
         fi
         if [[ "$mode" == primary ]]; then
-          fw::warn "Using the older snapshot $(basename "$newest") instead."
+          fw::warn "Using the older snapshot $(basename "${newest:-$other}") instead."
+        elif [[ -z "$newest" ]]; then
+          fw::warn "No earlier worktree copy to reuse, so using the snapshot $(basename "$other"). Use --db=primary for a new copy, or --db=<file> to choose one."
         fi
+        newest=${newest:-$other}
       fi
       printf '%s' "$newest"
       ;;
@@ -460,14 +499,24 @@ fw::is_dump() {
   return 1
 }
 
+# fw::has_site_build DIR: true when DIR has ddev-fire's site-build command and
+# DDEV offers it for DIR's project type.
+fw::has_site_build() {
+  local file="$1/.ddev/commands/host/site-build" types
+  [[ -f "$file" && -f "$1/.ddev/fire/scripts/lib.sh" ]] || return 1
+  types=$(sed -n 's/^## ProjectTypes:[[:space:]]*//p' "$file" | tr -d ' \t\r')
+  [[ -z "$types" || ",$types," == *",$(fw::config_scalar "$1" type),"* ]]
+}
+
 # fw::build_command DIR: the command that finishes a worktree after its database
 # is copied in, or "none".
 fw::build_command() {
   local cmd
   cmd=$(fw::setting "$1" WORKTREE_BUILD_COMMAND "")
   if [[ -z "$cmd" ]]; then
-    if [[ -f "$1/.ddev/commands/host/fire-build" ]]; then
-      cmd='ddev fire-build --no-db-import'
+    # --skip-db-import also skips the database download.
+    if fw::has_site_build "$1"; then
+      cmd='ddev site-build --skip-db-import'
     else
       case $(fw::config_scalar "$1" type) in
         # drush deploy needs Drupal 8.8 or later.
@@ -482,8 +531,8 @@ fw::build_command() {
 
 # fw::populate_hint DIR: how to fill an empty database.
 fw::populate_hint() {
-  if [[ -f "$1/.ddev/commands/host/fire-build" ]]; then
-    echo 'ddev fire-build'
+  if fw::has_site_build "$1"; then
+    echo 'ddev site-build'
   elif [[ -f "$1/fire.yml" ]]; then
     echo 'fire build'
   else

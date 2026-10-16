@@ -48,7 +48,9 @@ To start a worktree from the remote site rather than your local database, create
 `--db=reference/site-db.sql.gz`. See [Choosing the database](databases.md).
 
 Once [`ddev-fire`](https://github.com/fourkitchens/ddev-fire) is installed, the default build is
-already `ddev fire-build --no-db-import`; remove your `WORKTREE_BUILD_COMMAND`.
+already `ddev site-build --skip-db-import`, which builds the same way inside DDEV and skips the
+database download; remove your `WORKTREE_BUILD_COMMAND`. With `--db=fresh`, run `ddev site-build`
+in the worktree instead of `fire build`.
 
 If the project also has a `.lando.yml`, read [Lando projects](lando.md) first: FIRE may pick Lando
 in a worktree.

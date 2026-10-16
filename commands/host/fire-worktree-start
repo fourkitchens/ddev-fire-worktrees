@@ -5,7 +5,7 @@
 ## Usage: fire-worktree-start [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
 ## Example: ddev fire-worktree-start\nddev fire-worktree-start --db=fresh
 ## Aliases: worktree-start
-## Flags: [{"Name":"db","Type":"string","Usage":"Database for a new worktree: primary (snapshot the primary checkout), latest (its newest snapshot), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying a database"}]
+## Flags: [{"Name":"db","Type":"string","Usage":"Database for a new worktree: primary (snapshot the primary checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying a database"}]
 
 set -euo pipefail
 
