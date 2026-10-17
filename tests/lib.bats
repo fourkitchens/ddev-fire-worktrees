@@ -79,6 +79,36 @@ EOF
   assert_output "mysite-wt-1"
 }
 
+@test "settings a worktree's config files lack come from WORKTREE_SOURCE_ROOT" {
+  # The checkout that ran create, on a commit with the team's settings.
+  SOURCE="${TESTDIR}/source"
+  mkdir -p "${SOURCE}/.ddev"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n  - WORKTREE_BUILD_COMMAND=team-build\n' >"${SOURCE}/.ddev/config.yaml"
+  printf 'web_environment: [WORKTREE_DB=fresh]\n' >"${SOURCE}/.ddev/config.local.yaml"
+  # A branch from before them, with a config.local.yaml of its own.
+  printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
+  printf 'web_environment: [WORKTREE_BUILD_COMMAND=my-build]\n' >"${SITE}/.ddev/config.local.yaml"
+
+  WORKTREE_SOURCE_ROOT="${SOURCE}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "team"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_output "fresh"
+  run fw::build_command "${SITE}"
+  assert_output "my-build"
+  run fw::setting "${SITE}" WORKTREE_BASE_REF fallback
+  assert_output "fallback"
+
+  unset WORKTREE_SOURCE_ROOT
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "default"
+  # A source without a DDEV project adds nothing.
+  WORKTREE_SOURCE_ROOT="${TESTDIR}/missing"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_success
+  assert_output "primary"
+}
+
 @test "a single-site project has no hostnames to rewrite" {
   printf 'name: mysite\ntype: drupal11\nadditional_hostnames: []\n' >"${SITE}/.ddev/config.yaml"
   run fw::rewrite_hostnames "${SITE}" mysite mysite-feature-1
@@ -325,6 +355,35 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output --partial "Copied web/sites/default/settings.local.php"
   run cat "${TESTDIR}/site-feature-x/web/sites/default/settings.local.php"
   assert_output '<?php // from T3'
+}
+
+@test "prune lists unregistered projects with the primary checkout's prefix from any checkout" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  # A branch from before the project set its prefix.
+  git -C "${SITE}" worktree add -q -b feature/old "${TESTDIR}/site-feature-old"
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n' >"${SITE}/.ddev/config.yaml"
+  git -C "${SITE}" -c user.email=test@example.com -c user.name=Test commit -qam 'Add the prefix'
+
+  # Volumes of projects no registry entry names: one from before the prefix,
+  # one created with it, and one whose database prune already deleted.
+  docker() {
+    case $* in
+      'volume ls -q') printf 'mysite-gone-1-mariadb\nteam-gone-2-mariadb\nother-gone-3-mariadb\n' ;;
+      'volume ls --filter '*) echo ddev-team-gone-4 ;;
+    esac
+  }
+  ddev() { :; }
+  export -f ddev docker
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  cd "${TESTDIR}/site-feature-old"
+  run "${DIR}/commands/host/fire-worktree-prune"
+  assert_success
+  assert_line "No DDEV projects to prune."
+  assert_line "  mysite-gone-1"
+  assert_line "  team-gone-2"
+  assert_line "  team-gone-4"
+  refute_output --partial other-gone-3
 }
 
 @test "parallel registry writes keep every entry" {

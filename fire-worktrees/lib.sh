@@ -194,15 +194,21 @@ fw::web_environment() {
 }
 
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
-# (such as config.local.yaml) overrides an earlier one. Empty means DEFAULT.
+# (such as config.local.yaml) overrides an earlier one. When none of DIR's files
+# set NAME, such as on a branch that predates the setting, use the value from
+# WORKTREE_SOURCE_ROOT, the checkout that ran create. Empty means DEFAULT.
 fw::setting() {
-  local item value=$3
-  while IFS= read -r item; do
-    if [[ "$item" == "$2="* && -n "${item#"$2="}" ]]; then
-      value=${item#"$2="}
-    fi
-  done < <(fw::config_list "$1" web_environment)
-  printf '%s' "$value"
+  local dir item value=
+  for dir in "$1" ${WORKTREE_SOURCE_ROOT:+"$WORKTREE_SOURCE_ROOT"}; do
+    [[ -f "$dir/.ddev/config.yaml" ]] || continue
+    while IFS= read -r item; do
+      if [[ "$item" == "$2="* && -n "${item#"$2="}" ]]; then
+        value=${item#"$2="}
+      fi
+    done < <(fw::config_list "$dir" web_environment)
+    [[ -z "$value" ]] || break
+  done
+  printf '%s' "${value:-$3}"
 }
 
 # fw::slug TEXT MAX: lowercase letters, digits and single hyphens, at most MAX long.

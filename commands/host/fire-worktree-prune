@@ -59,8 +59,16 @@ fi
 
 # Projects from the project-local commands this add-on replaced have no registry
 # entry, and neither do volumes that earlier versions of prune left behind. Their
-# names can't prove which clone created them, so only list them.
-prefix=$(fw::slug "$(fw::setting "$FW_ROOT" WORKTREE_NAME_PREFIX "$(fw::primary_name)")" 12)
+# names can't prove which clone created them, so only list them. A worktree on
+# a branch without WORKTREE_NAME_PREFIX takes the prefix of the checkout that
+# created it, so look for this checkout's prefix and the primary checkout's.
+primary=$(fw::primary_name)
+prefixes=$(
+  for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do
+    fw::slug "$(fw::setting "$root" WORKTREE_NAME_PREFIX "$primary")" 12
+    echo
+  done | sort -u | paste -sd '|' -
+)
 unregistered=
 while IFS= read -r name; do
   [[ -n "$name" ]] || continue
@@ -73,9 +81,9 @@ while IFS= read -r name; do
   unregistered="$unregistered$name"$'\n'
 done < <(
   {
-    docker volume ls -q 2>/dev/null | sed -n -E "s/^($prefix-[a-z0-9-]+-[0-9]+)-(mariadb|mysql|postgres)\$/\1/p"
+    docker volume ls -q 2>/dev/null | sed -n -E "s/^(($prefixes)-[a-z0-9-]+-[0-9]+)-(mariadb|mysql|postgres)\$/\1/p"
     docker volume ls --filter label=com.docker.compose.project --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null |
-      sed -n -E "s/^ddev-($prefix-[a-z0-9-]+-[0-9]+)\$/\1/p"
+      sed -n -E "s/^ddev-(($prefixes)-[a-z0-9-]+-[0-9]+)\$/\1/p"
   } | sort -u
 )
 
