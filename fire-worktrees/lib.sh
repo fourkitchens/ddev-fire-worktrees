@@ -680,10 +680,11 @@ fw::is_drupal() {
 
 # fw::login_link URL: a one-time login link to the Drupal site at URL. Run it in
 # the worktree while its project is running. --uri overrides a DRUSH_OPTIONS_URI
-# the worktree inherited from the primary checkout.
+# the worktree inherited from the primary checkout. Drupal can print an HTML
+# warning to stdout with no newline before the link, so take the last URL.
 fw::login_link() {
   local link
-  link=$(ddev drush uli --no-browser --uri="$1" 2>/dev/null | tr -d '\r' | grep -E '^https?://' | tail -n 1) || true
+  link=$(ddev drush uli --no-browser --uri="$1" 2>/dev/null | grep -oE 'https?://[^[:space:]<>"]+' | tail -n 1) || true
   [[ -n "$link" ]] || return 1
   printf '%s' "$link"
 }
