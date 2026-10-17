@@ -29,6 +29,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
 * **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
   from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
+* **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. When
+  `create` runs it, a setting those files don't set comes from the checkout that ran `create`.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.
@@ -45,7 +47,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`
   can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
   Compose labelled with the project. It lists, but never deletes, older worktree projects and
-  leftover volumes that match your prefix, since another clone may own them.
+  leftover volumes that match the prefix of the checkout you run it in or of your main checkout,
+  since another clone may own them.
 * **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
   worktree before its first start, when DDEV would treat it as your main project, to overwrite a
   config file they didn't write, or to remove a checkout with uncommitted work. They never delete

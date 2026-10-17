@@ -4,6 +4,12 @@ Every setting is optional. Add them to `web_environment` in `.ddev/config.yaml` 
 or in `.ddev/config.local.yaml` for yourself; the local file wins. The commands read these files
 directly, so settings apply before a worktree's DDEV project exists.
 
+A worktree's own files come first. When `create` checks out a branch whose files don't set a
+setting, such as a branch from before your project added it, startup takes the value from the
+checkout you ran `create` in. The worktree then gets the same name prefix, copied files and build as
+a new branch. Later commands in that worktree, such as `refresh`, read only its own files, including
+the `config.local.yaml` it copied.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `WORKTREE_NAME_PREFIX` | Your project's name, cut to 12 characters | Start of each worktree's DDEV project name and URL. |

@@ -11,6 +11,11 @@ ddev fire-worktree-create --pr=123                      # a pull request
 ddev fire-worktree-create --pr=123 --base               # a pull request, and its base branch beside it
 ```
 
+Whichever commit a branch is on, its worktree runs your checkout's copy of startup, and takes your
+checkout's value for any [setting](configuration.md) the branch's own config doesn't set. A branch
+or pull request from before your project added the add-on or its settings gets the same name
+prefix, copied files and build as a new branch.
+
 ## Branches
 
 `ddev fire-worktree-create <branch>`:
