@@ -29,6 +29,13 @@ Startup copies the database only when the worktree has none yet, so reruns of
 `ddev fire-worktree-start` keep its data. After a copy, it runs `WORKTREE_BUILD_COMMAND` so the copy
 matches the branch's code and configuration. With `--no-build`, it prints the command instead.
 
+Before the build, startup and `refresh` check the copy, since a restore can stop partway and still
+report success. A copy with no tables looks incomplete, and so does one Drush can't bootstrap Drupal
+from. They then warn, skip the build and exit 0, so the site stays up; run
+`ddev fire-worktree-refresh` to copy the database again. In a project that isn't Drupal, the check
+finds only a copy with no tables. On later starts, a kept database with no tables gets the same
+warning, unless `--db=fresh` created it empty.
+
 A worktree that lives for days falls behind your main checkout. To replace its database with a new
 copy, run this in the worktree:
 

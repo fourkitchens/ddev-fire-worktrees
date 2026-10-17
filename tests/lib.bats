@@ -772,7 +772,8 @@ with_database() {
   assert_line "Seeding the new database from ${SEED}"
   assert_line "Building with: ddev drush deploy -y"
   assert_line "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
-  run cat "${DDEV_LOG}"
+  # Leave out the check of the copy's tables.
+  run grep -v '^mysql ' "${DDEV_LOG}"
   assert_output "$(printf '%s\n' \
     "start --reset-database --omit-snapshot --skip-confirmation --seed-snapshot=${SEED} ${NAME}" \
     'drush deploy -y' \
@@ -868,4 +869,146 @@ with_database() {
   run cat "${DDEV_LOG}"
   assert_output ""
   [ ! -e "${FW_LOCK}" ]
+}
+
+# copied_worktree: a PHP project whose build prints "built", a worktree of it at
+# WT, and a dump that every start imports, since no database volume exists.
+# ddev mysql prints TABLES as the copy's table count.
+copied_worktree() {
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_BUILD_COMMAND=echo built\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  DUMP="${TESTDIR}/site-db.sql.gz"
+  touch "${DUMP}"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  ddev() { [[ "$1" != mysql ]] || echo "${TABLES}"; }
+  docker() { :; }
+}
+
+@test "start warns that a copy with no tables looks incomplete, and skips the build" {
+  copied_worktree
+  TABLES=0
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: it has no tables. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_line "built"
+
+  TABLES=12
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "built"
+}
+
+@test "start warns when Drush can't bootstrap Drupal from a copy, and skips drush deploy" {
+  drupal_worktree
+  touch "${TESTDIR}/site-db.sql.gz"
+  # The build runs in its own process, so export the stand-in.
+  ddev() {
+    case $* in
+      mysql\ *) echo 16 ;;
+      'drush status --field=bootstrap')
+        printf '%s\n' "${BOOTSTRAP}"
+        return "${DRUSH_STATUS:-0}"
+        ;;
+      'drush deploy -y') echo deployed ;;
+    esac
+  }
+  export -f ddev
+  # As when the key_value table is missing.
+  BOOTSTRAP=
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: Drush can't bootstrap Drupal from it. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_line "deployed"
+
+  # Drupal can print warnings before Drush's answer, on the same line.
+  BOOTSTRAP='<details>Warning: file(../.git/HEAD)</details>Successful'
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "deployed"
+
+  # When Drush itself fails, the check can't tell, so the build runs.
+  BOOTSTRAP=
+  DRUSH_STATUS=1
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "deployed"
+}
+
+@test "start warns when the database it keeps has no tables, unless it was created empty" {
+  copied_worktree
+  TABLES=12
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  # Reruns keep the database.
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  TABLES=0
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
+
+  # fire-worktree-remove --keep-checkout deletes the record, and ddev start then
+  # creates an empty database.
+  RECORD="${SITE}/.git/worktrees/site-feature-x/fire-worktree-db"
+  rm "${RECORD}"
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
+
+  printf 'fresh\t\n' >"${RECORD}"
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  refute_output --partial "no tables"
+}
+
+@test "refresh warns when its copy looks incomplete, and skips the build" {
+  started_worktree
+  touch "${TESTDIR}/site-db.sql.gz"
+  ddev() {
+    echo "$*" >>"${DDEV_LOG}"
+    [[ "$1" != mysql ]] || echo 0
+  }
+  export -f ddev
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: it has no tables. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  run grep -c '^drush deploy' "${DDEV_LOG}"
+  assert_output 0
+}
+
+@test "a failed login link says why, with the first line of Drush's error" {
+  drupal_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  # What ddev drush uli printed to stderr for a copy without the users table.
+  ddev() {
+    [[ "$1" == drush ]] || return 0
+    cat "${DIR}/tests/testdata/drush-uli-without-users-table.txt" >&2
+    return 1
+  }
+  run fw::start_worktree "${WT}" "" false
+  assert_success
+  assert_line "Warning: Couldn't create a login link: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.users' doesn't exist: SELECT \"base\".\"uid\" AS \"uid\", \"base\".\"uuid\" AS \"uuid\", \"base\".\"langcode\" AS \"langcode\". Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+
+  # Drush's log messages carry a label.
+  ddev() {
+    [[ "$1" == drush ]] || return 0
+    printf ' [error]  Drush command terminated abnormally.\n' >&2
+    return 1
+  }
+  docker() { [[ "$1" != ps ]] || echo "ddev-${NAME}-web"; }
+  export -f ddev docker
+  export NAME
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-info" --json
+  assert_success
+  assert_line "Warning: Couldn't create a login link: Drush command terminated abnormally. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+  assert_line '  "login_url": null'
 }
