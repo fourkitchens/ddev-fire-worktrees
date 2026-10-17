@@ -12,9 +12,13 @@ setup() {
   bats_load_library bats-support
 
   DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
+  TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-lib.XXXXXX")" && pwd -P)"
+  # The start lock lives in DDEV's global directory, which DDEV names to the
+  # commands it runs. Keep it here, also for the commands tests run.
+  export DDEV_GLOBAL_DIR="${TESTDIR}/ddev"
+  mkdir -p "${DDEV_GLOBAL_DIR}"
   # shellcheck source=fire-worktrees/lib.sh
   source "${DIR}/fire-worktrees/lib.sh"
-  TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-lib.XXXXXX")" && pwd -P)"
   SITE="${TESTDIR}/site"
   mkdir -p "${SITE}/.ddev"
 }
@@ -73,6 +77,36 @@ EOF
   assert_output "mysite"
   run fw::generated_name "${SITE}"
   assert_output "mysite-wt-1"
+}
+
+@test "settings a worktree's config files lack come from WORKTREE_SOURCE_ROOT" {
+  # The checkout that ran create, on a commit with the team's settings.
+  SOURCE="${TESTDIR}/source"
+  mkdir -p "${SOURCE}/.ddev"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n  - WORKTREE_BUILD_COMMAND=team-build\n' >"${SOURCE}/.ddev/config.yaml"
+  printf 'web_environment: [WORKTREE_DB=fresh]\n' >"${SOURCE}/.ddev/config.local.yaml"
+  # A branch from before them, with a config.local.yaml of its own.
+  printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
+  printf 'web_environment: [WORKTREE_BUILD_COMMAND=my-build]\n' >"${SITE}/.ddev/config.local.yaml"
+
+  WORKTREE_SOURCE_ROOT="${SOURCE}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "team"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_output "fresh"
+  run fw::build_command "${SITE}"
+  assert_output "my-build"
+  run fw::setting "${SITE}" WORKTREE_BASE_REF fallback
+  assert_output "fallback"
+
+  unset WORKTREE_SOURCE_ROOT
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "default"
+  # A source without a DDEV project adds nothing.
+  WORKTREE_SOURCE_ROOT="${TESTDIR}/missing"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_success
+  assert_output "primary"
 }
 
 @test "a single-site project has no hostnames to rewrite" {
@@ -287,7 +321,6 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
@@ -309,7 +342,6 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${WT}" fresh false
   assert_success
@@ -333,7 +365,6 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT
   T3CODE_PROJECT_ROOT="${T3_ROOT}"
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
@@ -342,6 +373,35 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output --partial "Copied web/sites/default/settings.local.php"
   run cat "${TESTDIR}/site-feature-x/web/sites/default/settings.local.php"
   assert_output '<?php // from T3'
+}
+
+@test "prune lists unregistered projects with the primary checkout's prefix from any checkout" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  # A branch from before the project set its prefix.
+  git -C "${SITE}" worktree add -q -b feature/old "${TESTDIR}/site-feature-old"
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n' >"${SITE}/.ddev/config.yaml"
+  git -C "${SITE}" -c user.email=test@example.com -c user.name=Test commit -qam 'Add the prefix'
+
+  # Volumes of projects no registry entry names: one from before the prefix,
+  # one created with it, and one whose database prune already deleted.
+  docker() {
+    case $* in
+      'volume ls -q') printf 'mysite-gone-1-mariadb\nteam-gone-2-mariadb\nother-gone-3-mariadb\n' ;;
+      'volume ls --filter '*) echo ddev-team-gone-4 ;;
+    esac
+  }
+  ddev() { :; }
+  export -f ddev docker
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  cd "${TESTDIR}/site-feature-old"
+  run "${DIR}/commands/host/fire-worktree-prune"
+  assert_success
+  assert_line "No DDEV projects to prune."
+  assert_line "  mysite-gone-1"
+  assert_line "  team-gone-2"
+  assert_line "  team-gone-4"
+  refute_output --partial other-gone-3
 }
 
 @test "parallel registry writes keep every entry" {
@@ -379,6 +439,21 @@ extra\.zz-feature-x-[0-9]+$'
   assert [ ! -e "$(fw::registry_file).lock" ]
 }
 
+@test "starts take turns whatever their TMPDIR" {
+  mkdir -p "${TESTDIR}/tmp-login" "${TESTDIR}/tmp-agent"
+  # A start from a login shell holds the start lock...
+  TMPDIR="${TESTDIR}/tmp-login" bash -c 'source "$1"; fw::lock && touch "$2" && exec sleep 30' \
+    _ "${DIR}/fire-worktrees/lib.sh" "${TESTDIR}/held" 3>&- &
+  local holder=$!
+  while [ ! -e "${TESTDIR}/held" ] && kill -0 "$holder" 2>/dev/null; do sleep 0.1; done
+  # ...so one from a cron job or sandboxed agent, with its own TMPDIR, can't take it.
+  TMPDIR="${TESTDIR}/tmp-agent" run bash -c 'source "$1"; fw::try_lock "$FW_LOCK"' \
+    _ "${DIR}/fire-worktrees/lib.sh"
+  kill "$holder"
+  assert_failure
+  assert [ -d "${DDEV_GLOBAL_DIR}/fire-worktree-start.lock" ]
+}
+
 @test "parallel starts record every worktree" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site
@@ -390,7 +465,6 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   for i in 1 2 3 4; do
     (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
@@ -436,7 +510,6 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
   assert_failure
@@ -478,12 +551,12 @@ YAML
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   cd "${WT}"
   # The primary checkout has no snapshot for --db=latest to reuse.
-  TMPDIR="${TESTDIR}" run "${DIR}/commands/host/fire-worktree-start" --db=latest
+  run "${DIR}/commands/host/fire-worktree-start" --db=latest
   assert_failure
   assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
   refute_output --partial "Worktree URLs"
   assert_line "Startup log: ${WT}/.ddev/${FW_LOG_NAME}"
-  assert [ ! -e "${TESTDIR}/ddev-fire-worktrees.lock" ]
+  assert [ ! -e "${FW_LOCK}" ]
   run cat "${WT}/.ddev/${FW_LOG_NAME}"
   assert_line "Configured DDEV project $(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)"
   assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
@@ -516,6 +589,21 @@ YAML
   assert_output ""
 }
 
+@test "finds the login link after a warning Drupal prints on the same line" {
+  # A warning from settings.php reaches stdout as HTML with no newline at the
+  # end, so the link drush prints starts on its last line. The warning can name
+  # a URL of its own, and the lines can end in CRLF.
+  ddev() {
+    printf '%s\r\n%s\r\n%s%s\r\n' \
+      '<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file_get_contents(https://example.com/branch.txt): Failed to open stream in <em class="placeholder">include()</em> (line <em class="placeholder">5</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 5)' \
+      'Drupal\Core\Site\Settings::initialize() (Line: 1110)' \
+      '</pre></details>' "${4#--uri=}/user/reset/1/1792195923/abc/login"
+  }
+  run fw::login_link https://mysite-feature-x.ddev.site
+  assert_success
+  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/1792195923/abc/login"
+}
+
 # drupal_worktree: a Drupal project whose Drush URI names the primary site, and
 # a worktree of it at WT. Starts run without Docker or DDEV; ddev drush uli
 # prints a link to the --uri it gets.
@@ -524,7 +612,6 @@ drupal_worktree() {
   git_site
   WT="${TESTDIR}/site-feature-x"
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   ddev() {
     if [[ "$*" == 'drush uli --no-browser --uri='* ]]; then
@@ -703,7 +790,8 @@ with_database() {
   assert_line "Seeding the new database from ${SEED}"
   assert_line "Building with: ddev drush deploy -y"
   assert_line "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
-  run cat "${DDEV_LOG}"
+  # Leave out the check of the copy's tables.
+  run grep -v '^mysql ' "${DDEV_LOG}"
   assert_output "$(printf '%s\n' \
     "start --reset-database --omit-snapshot --skip-confirmation --seed-snapshot=${SEED} ${NAME}" \
     'drush deploy -y' \
@@ -799,4 +887,146 @@ with_database() {
   run cat "${DDEV_LOG}"
   assert_output ""
   [ ! -e "${FW_LOCK}" ]
+}
+
+# copied_worktree: a PHP project whose build prints "built", a worktree of it at
+# WT, and a dump that every start imports, since no database volume exists.
+# ddev mysql prints TABLES as the copy's table count.
+copied_worktree() {
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_BUILD_COMMAND=echo built\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  DUMP="${TESTDIR}/site-db.sql.gz"
+  touch "${DUMP}"
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  ddev() { [[ "$1" != mysql ]] || echo "${TABLES}"; }
+  docker() { :; }
+}
+
+@test "start warns that a copy with no tables looks incomplete, and skips the build" {
+  copied_worktree
+  TABLES=0
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: it has no tables. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_line "built"
+
+  TABLES=12
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "built"
+}
+
+@test "start warns when Drush can't bootstrap Drupal from a copy, and skips drush deploy" {
+  drupal_worktree
+  touch "${TESTDIR}/site-db.sql.gz"
+  # The build runs in its own process, so export the stand-in.
+  ddev() {
+    case $* in
+      mysql\ *) echo 16 ;;
+      'drush status --field=bootstrap')
+        printf '%s\n' "${BOOTSTRAP}"
+        return "${DRUSH_STATUS:-0}"
+        ;;
+      'drush deploy -y') echo deployed ;;
+    esac
+  }
+  export -f ddev
+  # As when the key_value table is missing.
+  BOOTSTRAP=
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: Drush can't bootstrap Drupal from it. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_line "deployed"
+
+  # Drupal can print warnings before Drush's answer, on the same line.
+  BOOTSTRAP='<details>Warning: file(../.git/HEAD)</details>Successful'
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "deployed"
+
+  # When Drush itself fails, the check can't tell, so the build runs.
+  BOOTSTRAP=
+  DRUSH_STATUS=1
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  refute_output --partial "looks incomplete"
+  assert_line "deployed"
+}
+
+@test "start warns when the database it keeps has no tables, unless it was created empty" {
+  copied_worktree
+  TABLES=12
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  # Reruns keep the database.
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  TABLES=0
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
+
+  # fire-worktree-remove --keep-checkout deletes the record, and ddev start then
+  # creates an empty database.
+  RECORD="${SITE}/.git/worktrees/site-feature-x/fire-worktree-db"
+  rm "${RECORD}"
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
+
+  printf 'fresh\t\n' >"${RECORD}"
+  run fw::start_worktree "${WT}" "" true
+  assert_success
+  refute_output --partial "no tables"
+}
+
+@test "refresh warns when its copy looks incomplete, and skips the build" {
+  started_worktree
+  touch "${TESTDIR}/site-db.sql.gz"
+  ddev() {
+    echo "$*" >>"${DDEV_LOG}"
+    [[ "$1" != mysql ]] || echo 0
+  }
+  export -f ddev
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true true
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: it has no tables. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  run grep -c '^drush deploy' "${DDEV_LOG}"
+  assert_output 0
+}
+
+@test "a failed login link says why, with the first line of Drush's error" {
+  drupal_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  NAME=$(fw::generated_name "${WT}")
+  docker() { echo "${NAME}-mariadb"; }
+  # What ddev drush uli printed to stderr for a copy without the users table.
+  ddev() {
+    [[ "$1" == drush ]] || return 0
+    cat "${DIR}/tests/testdata/drush-uli-without-users-table.txt" >&2
+    return 1
+  }
+  run fw::start_worktree "${WT}" "" false
+  assert_success
+  assert_line "Warning: Couldn't create a login link: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.users' doesn't exist: SELECT \"base\".\"uid\" AS \"uid\", \"base\".\"uuid\" AS \"uuid\", \"base\".\"langcode\" AS \"langcode\". Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+
+  # Drush's log messages carry a label.
+  ddev() {
+    [[ "$1" == drush ]] || return 0
+    printf ' [error]  Drush command terminated abnormally.\n' >&2
+    return 1
+  }
+  docker() { [[ "$1" != ps ]] || echo "ddev-${NAME}-web"; }
+  export -f ddev docker
+  export NAME
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-info" --json
+  assert_success
+  assert_line "Warning: Couldn't create a login link: Drush command terminated abnormally. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+  assert_line '  "login_url": null'
 }

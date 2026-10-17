@@ -1,0 +1,21 @@
+
+In ExceptionHandler.php line 96:
+                                                                               
+  SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.users' doesn'  
+  t exist: SELECT "base"."uid" AS "uid", "base"."uuid" AS "uuid", "base"."lan  
+  gcode" AS "langcode"                                                         
+  FROM                                                                         
+  "users" "base"                                                               
+  WHERE "base"."uid" IN (:db_condition_placeholder_0); Array                   
+  (                                                                            
+      [:db_condition_placeholder_0] => 1                                       
+  )                                                                            
+                                                                               
+
+In PdoTrait.php line 109:
+                                                                               
+  SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.users' doesn'  
+  t exist                                                                      
+                                                                               
+
+[31mFailed to run drush uli --no-browser --uri=https://x.ddev.site: exit status 1[0m

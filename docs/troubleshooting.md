@@ -15,10 +15,13 @@
 | `The worktree is running, but the import failed` | The site is up, but its database is empty or partly imported. Fix the dump, then run the `ddev import-db` command it prints. |
 | `This worktree has no database of its own yet` | `refresh` only replaces a database that startup gave the worktree. Run `ddev fire-worktree-start`, which copies one in. |
 | `ddev start failed, and the worktree's database may be empty` | `refresh` deleted the old database, but DDEV couldn't start with the new one. Fix the error, then run the command it prints. |
-| `Waiting for another worktree to finish starting` | Another worktree is running `ddev start`. A lock left by a crashed run is cleared automatically. |
-| `Timed out waiting for .../fire-worktrees.lock` | A fire-worktree command has held the registry lock for 30 seconds. If none is running, delete the lock directory it names. |
+| `Waiting for another worktree to finish starting` | Another worktree is running `ddev start`, for a start or a refresh. A lock left by a crashed run is cleared automatically. |
+| `Timed out waiting for ~/.ddev/fire-worktree-start.lock. Delete it if no other worktree is starting.` | A start or refresh has held the start lock through `ddev start` for 30 minutes. If no worktree is starting or refreshing, delete the directory it names. |
+| `Timed out waiting for <main checkout>/.git/fire-worktrees.lock. Delete it if no other fire-worktree command is running.` | A fire-worktree command has held the registry lock, which guards `.git/fire-worktrees`, for 30 seconds. If none is running, delete the directory it names. |
 | `This worktree inherits <NAME>=<url> from web_environment` | That value names your main checkout's site, so the worktree uses it too. Build it from `${DDEV_SITENAME}.${DDEV_TLD}` or `$DDEV_PRIMARY_URL`. See [Drupal notes](drupal.md#drupal-notes). |
-| `Couldn't create a login link` | `ddev drush uli` failed, for example because Drupal isn't installed in the worktree's database. Run the command it prints to see the error. |
+| `Couldn't create a login link` | `ddev drush uli` failed, and the warning shows the first line of Drush's error. For example, Drupal isn't installed in the worktree's database, or a table such as `users` is missing from an incomplete copy. Run the command it prints to see the whole error. |
+| `The database copy looks incomplete` | The new copy has no tables, or Drush can't bootstrap Drupal from it, as when a restore stops partway. Startup skipped the build and left the site running. Run `ddev fire-worktree-refresh` for a new copy, which it builds. If the source database is itself empty or broken, fix it first, or choose another with `--db`. |
+| `This worktree's database has no tables` | Startup kept a database that's empty, such as one `ddev start` created after `ddev fire-worktree-remove --keep-checkout`. Run `ddev fire-worktree-refresh` to copy one in. |
 | `has a label longer than 63 characters` | Shorten `WORKTREE_NAME_PREFIX` or the worktree's directory name. |
 | `Refusing to overwrite .ddev/config.worktree.local.yaml` | You or another tool wrote that file. Move its settings to `config.local.yaml` and delete it. |
 | `Refusing to remove ...; commit, stash or discard these changes first` | Commit, stash or delete the listed files, or use `--keep-checkout` to delete only the DDEV project. |

@@ -30,6 +30,7 @@ setup() {
   export PRIMARY="${TESTDIR}/primary"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
+  export CI=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
 
   # A small PHP project in its own Git repository, with one subdomain hostname.
@@ -139,6 +140,12 @@ worktree_name() {
   assert_output "2"
   assert_file_not_exists "${WT}/web/built.txt"
 
+  # A kept database that lost its tables gets a warning, not a new copy.
+  ddev mysql -e 'DROP TABLE marker'
+  run ddev fire-worktree-start
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
+
   run ddev fire-worktree-info
   assert_success
   assert_line "Project:   ${NAME} (running)"
@@ -214,6 +221,13 @@ EOF
   assert_output "ok"
   run grep -c "Building with: false" "${BROKEN}/.ddev/fire-worktree-start.log"
   assert_output "1"
+
+  # A copy with no tables isn't built, and startup exits 0.
+  : >"${TESTDIR}/empty.sql"
+  run ddev fire-worktree-create feature/empty --db="${TESTDIR}/empty.sql"
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: it has no tables. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_output --partial "Building with"
 
   run ddev fire-worktree-create feature/two --db=fresh
   assert_success
@@ -470,6 +484,12 @@ SH
   refute_output --partial "Seeding the new database"
   run ddev psql -tA -c 'SELECT COUNT(*) FROM marker'
   assert_output "2"
+
+  run ddev psql -c 'DROP TABLE marker'
+  assert_success
+  run ddev fire-worktree-start
+  assert_success
+  assert_line "Warning: This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
 }
 
 @test "a standard Drupal site needs no settings: the worktree copies the database and runs drush deploy" {
@@ -534,6 +554,18 @@ SH
   assert_line '  "status": "running",'
   assert_line --regexp "^  \"database\": \\{\"source\": \"primary\", \"file\": \"${PRIMARY}/\\.ddev/db_snapshots/fire-worktree-seed-[^\"]+\", \"created\": \"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\"\\},\$"
   assert_line --regexp "^  \"login_url\": \"https://${NAME}\\.ddev\\.site/user/reset/1/[^\"]+\"\$"
+
+  # A copy whose restore stopped partway: the tables up to config, alphabetically,
+  # and no cached user entities.
+  drop=$(ddev mysql -N -e "SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = 'db' AND (table_name > 'config' OR table_name = 'cache_entity')")
+  ddev mysql -e "DROP TABLE ${drop}"
+  run ddev snapshot --name=partial
+  assert_success
+  run ddev fire-worktree-refresh --db="$(echo .ddev/db_snapshots/partial-*)" --yes
+  assert_success
+  assert_line "Warning: The database copy looks incomplete: Drush can't bootstrap Drupal from it. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  refute_output --partial "Building with"
+  assert_line --regexp "^Warning: Couldn't create a login link: .*'db\.users' doesn't exist"
 
   cd "${PRIMARY}"
   run ddev drush config:get system.site name --format=string
