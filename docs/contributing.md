@@ -57,4 +57,11 @@ release, so publishing one ships it to every project that installs or updates th
 3. Click **Generate release notes**, then add a short summary above them. Call out anything that
    changes what existing worktrees or new worktrees do.
 4. Publish. CI runs again on the release, including the `install from release` test.
-5. Check the template with `curl -fsSL https://ddev.com/s/addon-update-checker.sh | bash`.
+5. Check the template with `curl -fsSL https://ddev.com/s/addon-update-checker.sh | bash`. It
+   exits 1 with two differences we chose in
+   [#3](https://github.com/fourkitchens/ddev-fire-worktrees/pull/3). Fix anything else it reports.
+   - `.github/workflows/tests.yml` has one `paths-ignore:`, not two. `pull_request` has none,
+     because its checks are required to merge, and a required check that never reports blocks
+     the merge.
+   - `.github/PULL_REQUEST_TEMPLATE.md` has no `## Short Summary (TL;DR)` section. It uses
+     Summary, Evidence and Merge Danger, and Summary does the TL;DR's job.

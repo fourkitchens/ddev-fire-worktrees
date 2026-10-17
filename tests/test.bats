@@ -30,6 +30,7 @@ setup() {
   export PRIMARY="${TESTDIR}/primary"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
+  export CI=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
 
   # A small PHP project in its own Git repository, with one subdomain hostname.
