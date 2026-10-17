@@ -10,7 +10,8 @@
 3. Starts the project, seeding a new database from `--db`.
 4. Runs `ddev composer install` when the project has a `composer.json`.
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints
-   the command.
+   the command. A copy that [looks incomplete](databases.md#when-the-database-is-copied) isn't
+   built.
 6. Prints the worktree's URLs. For a Drupal site with a database, it also prints a one-time login
    link from `ddev drush uli`. If the build failed, it then prints the command to rerun and exits
    1, or 0 with `WORKTREE_BUILD_FAILURE=warn`.

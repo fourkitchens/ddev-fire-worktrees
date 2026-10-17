@@ -46,7 +46,10 @@ IFS=$'\t' read -r db_source db_file <<<"$(fw::db_source)"
 
 login=
 if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
-  login=$(fw::login_link "$url") || fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+  if ! login=$(fw::login_link "$url"); then
+    fw::warn "Couldn't create a login link${login:+: $login}. Try: ddev drush uli --uri=$url"
+    login=
+  fi
 fi
 
 if [[ "$json" == true ]]; then

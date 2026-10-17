@@ -678,14 +678,44 @@ fw::is_drupal() {
   [[ "$(fw::config_scalar "$1" type)" == drupal* ]]
 }
 
+# fw::error_line FILE: the first line of the error in FILE, a command's stderr,
+# without a final period. Skips DDEV's "Failed to run" line, a Drush log label
+# such as [error], and the "In <file> line <n>:" heading of a Symfony error
+# block. Such a block wraps long lines inside a two-space margin, so a line
+# whose text reaches the margin continues on the next.
+fw::error_line() {
+  awk '
+    { sub(/\r$/, ""); gsub(/\033\[[0-9;]*m/, "") }
+    text == "" && (/^[ \t]*$/ || /^In .* line [0-9]+:$/ || /^Failed to run /) { next }
+    {
+      wrapped = /^  .*[^ ]  $/
+      line = $0
+      if (text == "") sub(/^[ \t]*(\[[a-z]+\][ \t]*)?/, "", line)
+      else sub(/^  /, "", line)
+      if (wrapped) sub(/  $/, "", line)
+      else sub(/[ \t]+$/, "", line)
+      text = text line
+      if (!wrapped) exit
+    }
+    END { sub(/\.$/, "", text); print text }' "$1"
+}
+
 # fw::login_link URL: a one-time login link to the Drupal site at URL. Run it in
 # the worktree while its project is running. --uri overrides a DRUSH_OPTIONS_URI
-# the worktree inherited from the primary checkout.
+# the worktree inherited from the primary checkout. Without a link, it prints
+# the first line of Drush's error instead, and fails.
 fw::login_link() {
-  local link
-  link=$(ddev drush uli --no-browser --uri="$1" 2>/dev/null | tr -d '\r' | grep -E '^https?://' | tail -n 1) || true
-  [[ -n "$link" ]] || return 1
-  printf '%s' "$link"
+  local link err status=0
+  err=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || return 1
+  link=$(ddev drush uli --no-browser --uri="$1" 2>"$err" | tr -d '\r' | grep -E '^https?://' | tail -n 1) || true
+  if [[ -n "$link" ]]; then
+    printf '%s' "$link"
+  else
+    fw::error_line "$err"
+    status=1
+  fi
+  rm -f "$err"
+  return "$status"
 }
 
 # fw::json TEXT: TEXT as a JSON string, or null when it's empty.
@@ -799,6 +829,40 @@ fw::import_dump() {
     fw::die "The worktree is running, but the import failed. Fix the error, then run: ddev import-db --file=$1"
 }
 
+# fw::db_table_count: how many tables FW_ROOT's running database has, or nothing
+# when it can't tell.
+fw::db_table_count() {
+  local count
+  if [[ "$(fw::config_nested "$FW_ROOT" database type)" == postgres ]]; then
+    count=$(ddev psql -tA -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')" 2>/dev/null) || true
+  else
+    count=$(ddev mysql -N -e 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()' 2>/dev/null) || true
+  fi
+  count=$(printf '%s' "$count" | tr -d '[:space:]')
+  if [[ "$count" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$count"
+  fi
+}
+
+# fw::check_copy: warn and fail when the database just copied into FW_ROOT looks
+# incomplete, as when a restore stops partway: it has no tables, or Drush runs
+# but can't bootstrap Drupal from it. When the database or Drush can't answer,
+# it can't tell, so it passes.
+fw::check_copy() {
+  local tables bootstrap problem=
+  tables=$(fw::db_table_count)
+  if [[ "$tables" == 0 ]]; then
+    problem='it has no tables'
+  # Drupal can print warnings to stdout ahead of Drush's answer.
+  elif [[ -n "$tables" ]] && fw::is_drupal "$FW_ROOT" &&
+    bootstrap=$(ddev drush status --field=bootstrap 2>/dev/null) && [[ "$bootstrap" != *Successful* ]]; then
+    problem="Drush can't bootstrap Drupal from it"
+  fi
+  [[ -n "$problem" ]] || return 0
+  fw::warn "The database copy looks incomplete: $problem. Skipped the build. To copy it again, run: ddev fire-worktree-refresh"
+  return 1
+}
+
 # fw::build_after_copy BUILD: run FW_ROOT's build command so a copied database
 # matches the branch, or with BUILD false, print it. Fails when the build fails.
 fw::build_after_copy() {
@@ -846,7 +910,7 @@ fw::show_worktree() {
     if link=$(fw::login_link "$url"); then
       printf 'One-time login link: %s\n' "$link"
     else
-      fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+      fw::warn "Couldn't create a login link${link:+: $link}. Try: ddev drush uli --uri=$url"
     fi
   fi
 }
@@ -982,9 +1046,15 @@ fw::start_steps() {
   fi
 
   if [[ -n "$seed" || -n "$dump" ]]; then
-    fw::build_after_copy "$build" || build_failed=true
+    if fw::check_copy; then
+      fw::build_after_copy "$build" || build_failed=true
+    fi
   elif [[ "$new_db" == true ]]; then
     empty=true
+  # A kept database with no tables that --db=fresh didn't create empty, such
+  # as one ddev start created after fire-worktree-remove --keep-checkout.
+  elif [[ "$(fw::db_source)" != fresh$'\t'* && "$(fw::db_table_count)" == 0 ]]; then
+    fw::warn "This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
   fi
   fw::show_worktree "$empty"
   if [[ "$build_failed" == true ]]; then
@@ -1050,7 +1120,9 @@ fw::refresh_worktree() {
   fw::import_dump "$dump"
 
   if [[ -n "$seed" || -n "$dump" ]]; then
-    fw::build_after_copy "$build" || build_failed=true
+    if fw::check_copy; then
+      fw::build_after_copy "$build" || build_failed=true
+    fi
   else
     empty=true
   fi
