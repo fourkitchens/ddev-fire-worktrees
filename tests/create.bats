@@ -299,7 +299,7 @@ YAML
   assert_output 0
   for dir in "${WT}" "${WT}-base"; do
     run cat "${dir}/.ddev/fire-worktree-start.log"
-    assert_line --regexp "^Configured DDEV project team-$(basename "${dir#"${TESTDIR}/site-"}")-[0-9]+\$"
+    assert_line --regexp "^Configured DDEV project team-${dir#"${TESTDIR}/site-"}-[0-9]+\$"
     assert_line "Copied notes.txt"
     assert_line "To populate the database: ddev import-db --file=<dump>, or ddev pull <provider>"
   done
