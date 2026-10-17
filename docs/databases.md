@@ -26,7 +26,9 @@ A path is read from the directory you run the command in.
 ## When the database is copied
 
 Startup copies the database only when the worktree has none yet, so reruns of
-`ddev fire-worktree-start` keep its data. After a copy, it runs `WORKTREE_BUILD_COMMAND` so the copy
+`ddev fire-worktree-start` keep its data. That includes the empty database `ddev start` creates, so
+after `ddev delete` or `ddev fire-worktree-remove --keep-checkout`, run `ddev fire-worktree-start`
+rather than `ddev start`. After a copy, it runs `WORKTREE_BUILD_COMMAND` so the copy
 matches the branch's code and configuration. With `--no-build`, it prints the command instead.
 
 A worktree that lives for days falls behind your main checkout. To replace its database with a new

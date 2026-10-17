@@ -723,6 +723,18 @@ fw::populate_hint() {
   fi
 }
 
+# fw::login_failed URL: warn that there's no login link to the Drupal site at
+# URL. A fresh or dumped database may still be empty, so say how to populate it
+# rather than how to rerun drush.
+fw::login_failed() {
+  local source
+  source=$(fw::db_source)
+  case ${source%%$'\t'*} in
+    fresh | dump) fw::warn "Couldn't create a login link. To populate the database: $(fw::populate_hint "$FW_ROOT")" ;;
+    *) fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$1" ;;
+  esac
+}
+
 # fw::build_failure DIR: what startup does when the build fails. fail exits 1;
 # warn exits 0, so an agent tool carries on in the running site.
 fw::build_failure() {
@@ -855,7 +867,7 @@ fw::show_worktree() {
     if link=$(fw::login_link "$url"); then
       printf 'One-time login link: %s\n' "$link"
     else
-      fw::warn "Couldn't create a login link. Try: ddev drush uli --uri=$url"
+      fw::login_failed "$url"
     fi
   fi
 }
