@@ -331,6 +331,24 @@ YAML
 extra\.zz-feature-x-[0-9]+$'
 }
 
+@test "an existing worktree keeps the name an earlier version gave it" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  # A pull request's base worktree from v0.2.0, which cut -base off long names.
+  WT="${TESTDIR}/site-feature-add-retry-logic-to-deploy-base"
+  git -C "${SITE}" worktree add -q --detach "${WT}"
+  printf '%s\noverride_config: true\nname: mysite-feature-add-retry-logic-2792006950\n' "${FW_MARKER}" >"${WT}/.ddev/${FW_CONFIG_NAME}"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Configured DDEV project mysite-feature-add-retry-logic-2792006950"
+  assert_equal "$(fw::generated_name "${WT}")" mysite-feature-add-retry-logic-2792006950
+}
+
 @test "copies local files from T3CODE_PROJECT_ROOT rather than the primary" {
   printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
   printf '/.ddev/config.local.yaml\n/web/sites/default/settings.local.php\n' >"${SITE}/.gitignore"

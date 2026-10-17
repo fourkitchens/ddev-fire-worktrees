@@ -21,8 +21,10 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 ## Details
 
 * **Project name.** Startup writes `.ddev/config.worktree.local.yaml` with `override_config: true`
-  and a name such as `mysite-abc-123-hero-1234567890`: the prefix, the directory name, and a
-  checksum of the checkout's path. The name stays the same when you rename the branch. DDEV
+  and a name such as `mysite-abc-123-hero-1234567890`: the prefix, the directory name cut to 24
+  characters, and a checksum of the checkout's path. A pull request's base worktree keeps `-base`
+  at the end of the cut, as in `mysite-abc-123-hero-base-1234567890`. The name stays the same when
+  you rename the branch, and a rerun keeps the name the worktree already has. DDEV
   gitignores the file and loads it after `config.local.yaml`; startup also adds it to
   `.git/info/exclude`.
 * **Hostnames.** Each `additional_hostnames` entry is rewritten for the worktree, and
