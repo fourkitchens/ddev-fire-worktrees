@@ -38,8 +38,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   volume, and seeds a new one. Both note where the database came from in the worktree's Git
   directory, as `fire-worktree-db`, for `ddev fire-worktree-info`. The file's modification time is
   when the database was created. See [Choosing the database](databases.md).
-* **Parallel starts.** A lock in your temporary directory makes worktrees take turns at `ddev start`,
-  including when they refresh.
+* **Parallel starts.** A lock in DDEV's global directory, `~/.ddev/fire-worktree-start.lock`, makes
+  worktrees take turns at `ddev start`, including when they refresh, whichever tool or shell runs
+  them. `ddev version` shows the directory as `global-ddev-dir`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
   Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`

@@ -15,9 +15,10 @@ setup() {
   DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
   CREATE="${DIR}/commands/host/fire-worktree-create"
   TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-create.XXXXXX")" && pwd -P)"
-  # The start lock lives in TMPDIR.
-  export TMPDIR="${TESTDIR}/tmp"
-  mkdir -p "${TMPDIR}"
+  # The start lock lives in DDEV's global directory, which DDEV names to the
+  # commands it runs.
+  export DDEV_GLOBAL_DIR="${TESTDIR}/ddev"
+  mkdir -p "${DDEV_GLOBAL_DIR}"
 
   # Ignore the developer's Git settings, such as commit signing.
   export GIT_CONFIG_GLOBAL="${TESTDIR}/gitconfig"
