@@ -15,9 +15,10 @@ setup() {
   DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
   CREATE="${DIR}/commands/host/fire-worktree-create"
   TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-create.XXXXXX")" && pwd -P)"
-  # The start lock lives in TMPDIR.
-  export TMPDIR="${TESTDIR}/tmp"
-  mkdir -p "${TMPDIR}"
+  # The start lock lives in DDEV's global directory, which DDEV names to the
+  # commands it runs.
+  export DDEV_GLOBAL_DIR="${TESTDIR}/ddev"
+  mkdir -p "${DDEV_GLOBAL_DIR}"
 
   # Ignore the developer's Git settings, such as commit signing.
   export GIT_CONFIG_GLOBAL="${TESTDIR}/gitconfig"
@@ -83,6 +84,29 @@ open_pr() {
 # head_of DIR
 head_of() {
   git -C "$1" rev-parse HEAD
+}
+
+# adopt_settings: as the teammate, add worktree settings to origin's main, as a
+# project adopting the add-on does, then pull them into the site and give it the
+# gitignored file they list.
+adopt_settings() {
+  git -C "${MATE}" fetch -q origin
+  git -C "${MATE}" checkout -q -B main origin/main
+  cat >"${MATE}/.ddev/config.yaml" <<'YAML'
+name: mysite
+type: php
+web_environment:
+    - WORKTREE_NAME_PREFIX=team
+    - WORKTREE_COPY_FILES=.ddev/config.local.yaml notes.txt
+    - WORKTREE_DB=fresh
+    - WORKTREE_BUILD_COMMAND=echo team-build
+YAML
+  printf '/notes.txt\n' >"${MATE}/.gitignore"
+  git -C "${MATE}" add -A
+  git -C "${MATE}" commit -qm 'Add worktree settings'
+  git -C "${MATE}" push -q origin main
+  git -C "${SITE}" pull -q
+  echo notes >"${SITE}/notes.txt"
 }
 
 @test "checks out an existing local branch, and refuses one checked out elsewhere" {
@@ -244,6 +268,42 @@ head_of() {
   assert_output --partial "Couldn't fetch pull request 99 from origin."
   run git for-each-ref refs/fire-worktrees
   assert_output ""
+}
+
+@test "a branch that predates the project's settings gets them from the checkout that runs create" {
+  mate_commit feature/old >/dev/null
+  adopt_settings
+  # A dump, so startup builds after it imports.
+  touch "${TESTDIR}/site-db.sql.gz"
+
+  run "${CREATE}" feature/old --db="${TESTDIR}/site-db.sql.gz" --no-build
+  assert_success
+  WT="${TESTDIR}/site-feature-old"
+  run grep -c WORKTREE_ "${WT}/.ddev/config.yaml"
+  assert_output 0
+  run cat "${WT}/.ddev/fire-worktree-start.log"
+  assert_line --regexp '^Configured DDEV project team-feature-old-[0-9]+$'
+  assert_line "Copied notes.txt"
+  assert_line "Skipped the build. To run it: echo team-build"
+}
+
+@test "a pull request that predates the project's settings starts like its base" {
+  open_pr 7 "$(mate_commit feature/old-pr)"
+  adopt_settings
+  printf 'feature/old-pr\nmain\nfalse\nfourkitchens\n' >"${GH_ANSWERS}/7"
+
+  # WORKTREE_DB=fresh applies to both, so neither looks for a snapshot to copy.
+  run "${CREATE}" --pr=7 --base
+  assert_success
+  WT="${TESTDIR}/site-feature-old-pr"
+  run grep -c WORKTREE_ "${WT}/.ddev/config.yaml"
+  assert_output 0
+  for dir in "${WT}" "${WT}-base"; do
+    run cat "${dir}/.ddev/fire-worktree-start.log"
+    assert_line --regexp "^Configured DDEV project team-${dir#"${TESTDIR}/site-"}-[0-9]+\$"
+    assert_line "Copied notes.txt"
+    assert_line "To populate the database: ddev import-db --file=<dump>, or ddev pull <provider>"
+  done
 }
 
 @test "rejects --base without --pr, and a pull request number that isn't one" {
