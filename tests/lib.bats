@@ -619,12 +619,6 @@ drupal_worktree() {
   assert_line --index 0 "Configured DDEV project ${NAME}"
   assert_output --partial "$(printf 'Worktree URLs:\n  https://%s.ddev.site\n  https://news.%s.ddev.site\n' "${NAME}" "${NAME}")"
   assert_line "One-time login link: https://${NAME}.ddev.site/user/reset/1/abc/def/login"
-
-  # Drush fails, for example because the site isn't installed.
-  ddev() { [[ "$1" != drush ]]; }
-  run fw::start_worktree "${WT}" "" false
-  assert_success
-  assert_output --partial "Warning: Couldn't create a login link. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
 }
 
 @test "records where a worktree's database came from" {
@@ -676,17 +670,19 @@ drupal_worktree() {
   assert_output --partial "Run: ddev fire-worktree-start"
 
   # The record's modification time is when the database was created. Show it in
-  # local time, five hours behind UTC, and in UTC for JSON.
-  export TZ=EST5
+  # local time, five hours behind UTC, and in UTC for JSON. A stopped project
+  # keeps its database, so ddev start is enough.
+  export TZ=EST5 NAME
   touch -t 202610010930 "${SITE}/.git/worktrees/site-feature-x/fire-worktree-db"
+  docker() { [[ "$1" != volume ]] || echo "${NAME}-mariadb"; }
+  export -f docker
   cd "${WT}/.ddev"
   run "${INFO}"
   assert_success
-  assert_output "$(printf 'Project:   %s (not started)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  empty (--db=fresh)\n           created 2026-10-01 09:30\nLogin:     start the project with ddev start, then rerun this command' "${NAME}" "${NAME}" "${NAME}")"
+  assert_output "$(printf 'Project:   %s (stopped)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  empty (--db=fresh)\n           created 2026-10-01 09:30\nLogin:     start the project with ddev start, then rerun this command' "${NAME}" "${NAME}" "${NAME}")"
 
   docker() { [[ "$1" != ps ]] || echo "ddev-${NAME}-web"; }
   export -f docker
-  export NAME
   run "${INFO}" --json
   assert_success
   assert_output "$(printf '{\n  "name": "%s",\n  "status": "running",\n  "urls": ["https://%s.ddev.site", "https://news.%s.ddev.site"],\n  "database": {"source": "fresh", "file": null, "created": "2026-10-01T14:30:00Z"},\n  "login_url": "https://%s.ddev.site/user/reset/1/abc/def/login"\n}' "${NAME}" "${NAME}" "${NAME}" "${NAME}")"
@@ -720,6 +716,83 @@ with_database() {
   docker() { [[ "$1" != volume ]] || echo "${NAME}-mariadb"; }
   export -f ddev docker
   export DDEV_LOG NAME
+}
+
+@test "fire-worktree-info points a worktree whose database is gone to fire-worktree-start" {
+  started_worktree
+  INFO="${DIR}/commands/host/fire-worktree-info"
+  cd "${WT}"
+  # ddev start would create an empty database, which startup would then keep.
+  expected=$(printf 'Project:   %s (not started)\nURLs:      https://%s.ddev.site\n           https://news.%s.ddev.site\nDatabase:  none yet; run ddev fire-worktree-start to copy one in' "${NAME}" "${NAME}" "${NAME}")
+
+  # ddev delete deletes the database volume but leaves startup's record.
+  docker() { :; }
+  export -f docker
+  run "${INFO}"
+  assert_success
+  assert_output "${expected}"
+  run "${INFO}" --json
+  assert_success
+  assert_output --partial '"status": "not started"'
+  assert_output --partial '"database": {"source": "none", "file": null, "created": null}'
+
+  # remove --keep-checkout deletes both.
+  run "${DIR}/commands/host/fire-worktree-remove" --keep-checkout --yes
+  assert_success
+  run "${INFO}"
+  assert_success
+  assert_output "${expected}"
+}
+
+@test "without a login link, a fresh or dumped database gets the populate hint rather than a drush retry" {
+  started_worktree
+  # A running FIRE project that drush can't log in to, as with an empty database.
+  touch "${WT}/fire.yml"
+  ddev() {
+    echo "$*" >>"${DDEV_LOG}"
+    [[ "$1" == drush ]] || return 0
+    printf ' [error]  Drush command terminated abnormally.\n' >&2
+    return 1
+  }
+  docker() {
+    case $1 in
+      ps) echo "ddev-${NAME}-web" ;;
+      volume) echo "${NAME}-mariadb" ;;
+    esac
+  }
+  export -f ddev docker
+  INFO="${DIR}/commands/host/fire-worktree-info"
+  hint="Warning: Couldn't create a login link: Drush command terminated abnormally. To populate the database: fire build"
+  retry="Warning: Couldn't create a login link: Drush command terminated abnormally. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
+
+  # A rerun keeps the --db=fresh database.
+  run fw::start_worktree "${WT}" "" false
+  assert_success
+  assert_line "${hint}"
+  refute_output --partial "${retry}"
+  cd "${WT}"
+  run "${INFO}"
+  assert_success
+  assert_line "${hint}"
+  refute_output --partial "${retry}"
+
+  # A dump can leave the database empty or partly restored.
+  touch "${TESTDIR}/dump.sql.gz"
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/dump.sql.gz" false true
+  assert_success
+  assert_line "${hint}"
+  run "${INFO}"
+  assert_line "${hint}"
+
+  # A snapshot restores a whole database, so drush's own error is what to read.
+  touch "${TESTDIR}/manual-mariadb_10.11.gz"
+  run fw::refresh_worktree "${WT}" "${TESTDIR}/manual-mariadb_10.11.gz" false true
+  assert_success
+  assert_line "${retry}"
+  refute_output --partial "To populate"
+  run "${INFO}"
+  assert_line "${retry}"
+  refute_output --partial "To populate"
 }
 
 @test "refresh refuses the primary checkout, a worktree without its own database, and a run without --yes" {
@@ -983,7 +1056,9 @@ copied_worktree() {
 
 @test "a failed login link says why, with the first line of Drush's error" {
   drupal_worktree
-  run fw::start_worktree "${WT}" fresh false
+  # A copy rather than --db=fresh, which gets the populate hint instead of the drush retry.
+  touch "${TESTDIR}/copy-mariadb_10.11.gz"
+  run fw::start_worktree "${WT}" "${TESTDIR}/copy-mariadb_10.11.gz" false
   assert_success
   NAME=$(fw::generated_name "${WT}")
   docker() { echo "${NAME}-mariadb"; }

@@ -25,9 +25,11 @@ and age, and a new login link:
 ```
 
 `database.source` is the `--db` the database came from: `primary`, `latest`, `fresh`, `snapshot` or
-`dump`, or `unknown` for a worktree started before this was recorded. `database.created` is when
-startup or the last refresh created the database, in UTC, or `null` when that's unknown. `login_url`
-is `null` when the project isn't running or isn't Drupal.
+`dump`, `unknown` for a worktree started before this was recorded, or `none` when the worktree has no
+database, as after `ddev fire-worktree-remove --keep-checkout`. Run `ddev fire-worktree-start` to
+copy one in, not `ddev start`, which creates an empty one. `database.created` is when startup or the
+last refresh created the database, in UTC, or `null` when that's unknown or there's no database.
+`login_url` is `null` when the project isn't running or isn't Drupal.
 
 To give a worktree a new copy of the database, run `ddev fire-worktree-refresh --yes` in it.
 

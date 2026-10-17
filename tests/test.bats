@@ -158,6 +158,21 @@ worktree_name() {
   assert_output --partial "main (primary)"
   assert_line --regexp "^feature/one +${NAME} +running +0 "
 
+  # Without a database, info points to startup, which copies one in. ddev start
+  # would create an empty one that startup then keeps.
+  run ddev fire-worktree-remove --keep-checkout --yes
+  assert_success
+  run ddev fire-worktree-info
+  assert_success
+  assert_line "Project:   ${NAME} (not started)"
+  assert_line "Database:  none yet; run ddev fire-worktree-start to copy one in"
+  refute_output --partial "ddev start"
+  run ddev fire-worktree-start
+  assert_success
+  assert_output --partial "Seeding the new database from"
+  run ddev mysql -N -e 'SELECT v FROM marker'
+  assert_output "from-primary"
+
   # Removal refuses uncommitted files and non-interactive runs without --yes.
   touch scratch.txt
   run ddev fire-worktree-remove --yes

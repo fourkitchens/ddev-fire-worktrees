@@ -42,12 +42,19 @@ name=$(fw::yaml_scalar ".ddev/$FW_CONFIG_NAME" name)
 status=$(fw::status "$name" "$(fw::running_containers)")
 urls=$(fw::urls "$FW_ROOT" "$name")
 url="https://$name.$(fw::tld "$FW_ROOT")"
-IFS=$'\t' read -r db_source db_file <<<"$(fw::db_source)"
+# Without a database volume there's no database, whatever startup's record says,
+# as after ddev delete.
+db_source=none db_file='' created='' created_utc=''
+if [[ "$status" != 'not started' ]]; then
+  IFS=$'\t' read -r db_source db_file <<<"$(fw::db_source)"
+  created=$(fw::db_created '+%Y-%m-%d %H:%M')
+  created_utc=$(fw::db_created -u +%Y-%m-%dT%H:%M:%SZ)
+fi
 
 login=
 if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
   if ! login=$(fw::login_link "$url"); then
-    fw::warn "Couldn't create a login link${login:+: $login}. Try: ddev drush uli --uri=$url"
+    fw::login_failed "$url" "$login"
     login=
   fi
 fi
@@ -60,12 +67,14 @@ if [[ "$json" == true ]]; then
     sep=', '
   done <<<"$urls"
   printf '],\n  "database": {"source": %s, "file": %s, "created": %s},\n' "$(fw::json "$db_source")" "$(fw::json "$db_file")" \
-    "$(fw::json "$(fw::db_created -u +%Y-%m-%dT%H:%M:%SZ)")"
+    "$(fw::json "$created_utc")"
   printf '  "login_url": %s\n}\n' "$(fw::json "$login")"
   exit 0
 fi
 
 case $db_source in
+  # ddev start would create an empty database, which startup would then keep.
+  none) db_text='none yet; run ddev fire-worktree-start to copy one in' ;;
   fresh) db_text='empty (--db=fresh)' ;;
   primary | latest) db_text="$db_file (--db=$db_source)" ;;
   unknown) db_text='unknown; it was created before startup recorded its source' ;;
@@ -78,12 +87,11 @@ while IFS= read -r u; do
   label=
 done <<<"$urls"
 printf 'Database:  %s\n' "$db_text"
-created=$(fw::db_created '+%Y-%m-%d %H:%M')
 if [[ -n "$created" ]]; then
   printf '           created %s\n' "$created"
 fi
 if [[ -n "$login" ]]; then
   printf 'Login:     %s\n' "$login"
-elif fw::is_drupal "$FW_ROOT" && [[ "$status" != running ]]; then
+elif fw::is_drupal "$FW_ROOT" && [[ "$status" == stopped ]]; then
   printf 'Login:     start the project with ddev start, then rerun this command\n'
 fi
