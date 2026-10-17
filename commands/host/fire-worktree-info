@@ -53,7 +53,10 @@ fi
 
 login=
 if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
-  login=$(fw::login_link "$url") || fw::login_failed "$url"
+  if ! login=$(fw::login_link "$url"); then
+    fw::login_failed "$url" "$login"
+    login=
+  fi
 fi
 
 if [[ "$json" == true ]]; then
