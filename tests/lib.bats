@@ -512,6 +512,21 @@ YAML
   assert_output ""
 }
 
+@test "finds the login link after a warning Drupal prints on the same line" {
+  # A warning from settings.php reaches stdout as HTML with no newline at the
+  # end, so the link drush prints starts on its last line. The warning can name
+  # a URL of its own, and the lines can end in CRLF.
+  ddev() {
+    printf '%s\r\n%s\r\n%s%s\r\n' \
+      '<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file_get_contents(https://example.com/branch.txt): Failed to open stream in <em class="placeholder">include()</em> (line <em class="placeholder">5</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 5)' \
+      'Drupal\Core\Site\Settings::initialize() (Line: 1110)' \
+      '</pre></details>' "${4#--uri=}/user/reset/1/1792195923/abc/login"
+  }
+  run fw::login_link https://mysite-feature-x.ddev.site
+  assert_success
+  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/1792195923/abc/login"
+}
+
 # drupal_worktree: a Drupal project whose Drush URI names the primary site, and
 # a worktree of it at WT. Starts run without Docker or DDEV; ddev drush uli
 # prints a link to the --uri it gets.
