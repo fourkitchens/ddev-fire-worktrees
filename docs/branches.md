@@ -58,8 +58,9 @@ move it; pass another branch name.
 ## Comparing before and after
 
 `--base` also creates a worktree on the pull request's base branch, as origin has it, beside the
-first: `../mysite-abc-123-hero-base`. It needs `gh` to find the base branch. Its HEAD is detached,
-so your main checkout keeps the base branch.
+first: `../mysite-abc-123-hero-base`. Its project name and URL keep `-base`, however long the branch
+name. It needs `gh` to find the base branch. Its HEAD is detached, so your main checkout keeps the
+base branch.
 
 When the pull request's worktree copies your main checkout's database, the base worktree reuses
 that copy (`--db=latest`), so both start from the same data. Run `ddev fire-worktree-remove` in

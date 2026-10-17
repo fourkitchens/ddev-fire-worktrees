@@ -925,7 +925,15 @@ fw::start_steps() {
     if [[ -n "$FW_PRIMARY_ROOT" ]]; then
       dir=${dir#"$(basename "$FW_PRIMARY_ROOT")-"}
     fi
-    slug=$(fw::slug "$dir" 24)
+    # Directory names can't be longer than 255.
+    slug=$(fw::slug "$dir" 255)
+    if [[ "$slug" == *-base ]]; then
+      # Keep the -base of a pull request's base worktree, which create names
+      # after the pull request's worktree.
+      slug="$(fw::slug "${slug%-base}" 19)-base"
+    else
+      slug=$(fw::slug "$slug" 24)
+    fi
     suffix=$(printf '%s' "$FW_ROOT" | cksum | awk '{print $1}')
     FW_NAME="${prefix:-wt}-${slug:-wt}-$suffix"
   fi

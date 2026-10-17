@@ -85,6 +85,11 @@ head_of() {
   git -C "$1" rev-parse HEAD
 }
 
+# project_of DIR: the DDEV project name startup gave DIR.
+project_of() {
+  awk '$1 == "name:" { print $2; exit }' "$1/.ddev/config.worktree.local.yaml"
+}
+
 @test "checks out an existing local branch, and refuses one checked out elsewhere" {
   git checkout -q -b feature/local
   echo local >local.txt
@@ -207,6 +212,27 @@ head_of() {
   assert_output --partial "Checked out pull request #7 as branch review-7 in:"
   assert_equal "$(head_of "${TESTDIR}/site-review-7")" "$(git -C "${MATE}" rev-parse HEAD)"
   assert_equal "$(git -C "${TESTDIR}/site-review-7" rev-parse --abbrev-ref '@{upstream}')" origin/feature/pr
+}
+
+@test "a long branch's base worktree keeps -base in its project name" {
+  open_pr 10 "$(mate_commit feature/add-retry-logic-to-deploy)"
+  printf 'feature/add-retry-logic-to-deploy\nmain\nfalse\nfourkitchens\n' >"${GH_ANSWERS}/10"
+
+  run "${CREATE}" --pr=10 --base --db=fresh
+  assert_success
+  WT="${TESTDIR}/site-feature-add-retry-logic-to-deploy"
+  assert_regex "$(project_of "${WT}")" '^mysite-feature-add-retry-logic-[0-9]+$'
+  assert_regex "$(project_of "${WT}-base")" '^mysite-feature-add-retry-l-base-[0-9]+$'
+
+  # create cuts the directory's branch part to 80 characters.
+  LONG=feature/$(printf 'x%.0s' {1..80})
+  open_pr 11 "$(mate_commit "${LONG}")"
+  printf '%s\nmain\nfalse\nfourkitchens\n' "${LONG}" >"${GH_ANSWERS}/11"
+  run "${CREATE}" --pr=11 --base --db=fresh
+  assert_success
+  WT="${TESTDIR}/site-feature-$(printf 'x%.0s' {1..72})"
+  assert_regex "$(project_of "${WT}")" '^mysite-feature-xxxxxxxxxxxxxxxx-[0-9]+$'
+  assert_regex "$(project_of "${WT}-base")" '^mysite-feature-xxxxxxxxxxx-base-[0-9]+$'
 }
 
 @test "checks out a fork's pull request, or one gh can't look up, through its pull ref" {
