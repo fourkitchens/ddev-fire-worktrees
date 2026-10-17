@@ -12,9 +12,13 @@ setup() {
   bats_load_library bats-support
 
   DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
+  TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-lib.XXXXXX")" && pwd -P)"
+  # The start lock lives in DDEV's global directory, which DDEV names to the
+  # commands it runs. Keep it here, also for the commands tests run.
+  export DDEV_GLOBAL_DIR="${TESTDIR}/ddev"
+  mkdir -p "${DDEV_GLOBAL_DIR}"
   # shellcheck source=fire-worktrees/lib.sh
   source "${DIR}/fire-worktrees/lib.sh"
-  TESTDIR="$(cd "$(mktemp -d "${BATS_TMPDIR:-/tmp}/fire-worktrees-lib.XXXXXX")" && pwd -P)"
   SITE="${TESTDIR}/site"
   mkdir -p "${SITE}/.ddev"
 }
@@ -287,7 +291,6 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
@@ -314,7 +317,6 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT
   T3CODE_PROJECT_ROOT="${T3_ROOT}"
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
@@ -360,6 +362,21 @@ extra\.zz-feature-x-[0-9]+$'
   assert [ ! -e "$(fw::registry_file).lock" ]
 }
 
+@test "starts take turns whatever their TMPDIR" {
+  mkdir -p "${TESTDIR}/tmp-login" "${TESTDIR}/tmp-agent"
+  # A start from a login shell holds the start lock...
+  TMPDIR="${TESTDIR}/tmp-login" bash -c 'source "$1"; fw::lock && touch "$2" && exec sleep 30' \
+    _ "${DIR}/fire-worktrees/lib.sh" "${TESTDIR}/held" 3>&- &
+  local holder=$!
+  while [ ! -e "${TESTDIR}/held" ] && kill -0 "$holder" 2>/dev/null; do sleep 0.1; done
+  # ...so one from a cron job or sandboxed agent, with its own TMPDIR, can't take it.
+  TMPDIR="${TESTDIR}/tmp-agent" run bash -c 'source "$1"; fw::try_lock "$FW_LOCK"' \
+    _ "${DIR}/fire-worktrees/lib.sh"
+  kill "$holder"
+  assert_failure
+  assert [ -d "${DDEV_GLOBAL_DIR}/fire-worktree-start.lock" ]
+}
+
 @test "parallel starts record every worktree" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site
@@ -371,7 +388,6 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   for i in 1 2 3 4; do
     (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
@@ -417,7 +433,6 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
   assert_failure
@@ -459,12 +474,12 @@ YAML
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   cd "${WT}"
   # The primary checkout has no snapshot for --db=latest to reuse.
-  TMPDIR="${TESTDIR}" run "${DIR}/commands/host/fire-worktree-start" --db=latest
+  run "${DIR}/commands/host/fire-worktree-start" --db=latest
   assert_failure
   assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
   refute_output --partial "Worktree URLs"
   assert_line "Startup log: ${WT}/.ddev/${FW_LOG_NAME}"
-  assert [ ! -e "${TESTDIR}/ddev-fire-worktrees.lock" ]
+  assert [ ! -e "${FW_LOCK}" ]
   run cat "${WT}/.ddev/${FW_LOG_NAME}"
   assert_line "Configured DDEV project $(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)"
   assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
@@ -505,7 +520,6 @@ drupal_worktree() {
   git_site
   WT="${TESTDIR}/site-feature-x"
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
-  FW_LOCK="${TESTDIR}/lock"
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   ddev() {
     if [[ "$*" == 'drush uli --no-browser --uri='* ]]; then
