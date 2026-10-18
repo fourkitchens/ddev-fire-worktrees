@@ -106,10 +106,12 @@ section() {
 
 # shared_line setup|teardown: the line the "Any agent tool" section publishes,
 # the first line of the first code block under "### The setup line" or
-# "### The teardown line".
+# "### The teardown line". It reads to the end rather than exiting, so cut
+# doesn't fail writing to a closed pipe under pipefail.
 shared_line() {
   section 'Any agent tool' | awk -v heading="### The $1 line" '
-    inside && fence { print; exit }
+    done { next }
+    inside && fence { print; done = 1; next }
     inside && /^```/ { fence = 1; next }
     !fence && /^#/ { inside = ($0 == heading) }
   '
@@ -172,7 +174,8 @@ json_member() {
 # its own.
 json_array() {
   awk -v key="\"$1\": [" '
-    inside && /^ *\]/ { exit }
+    done { next }
+    inside && /^ *\]/ { done = 1; next }
     inside
     { line = $0; sub(/^ +/, "", line); if (line == key) inside = 1 }
   ' | sed -nE 's/^ *("([^"\\]|\\.)*"),?$/\1/p'
@@ -182,7 +185,8 @@ json_array() {
 # stdin, indentation included.
 yaml_block() {
   awk -v key="$1: |" '
-    inside { print; exit }
+    done { next }
+    inside { print; done = 1; next }
     { line = $0; sub(/^ +/, "", line); inside = (line == key) }
   '
 }
