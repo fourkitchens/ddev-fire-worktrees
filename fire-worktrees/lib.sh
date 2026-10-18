@@ -1068,8 +1068,11 @@ fw::write_git_mount() {
   # create_host_path: false makes a moved main checkout fail to start rather
   # than mount an empty directory Docker creates at the old path. The .git file
   # follows the worktree through DDEV_APPROOT.
+  # The second line keeps this file out of the custom configuration DDEV lists
+  # on every start.
   cat >"$compose.tmp" <<YAML
 $FW_MARKER
+#ddev-silent-no-warn
 services:
   web:
     volumes:
