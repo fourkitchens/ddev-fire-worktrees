@@ -226,14 +226,20 @@ fw::web_environment() {
     END { for (j = 1; j <= n; j++) print entry[order[j]] }'
 }
 
+# fw::source_checkout: the checkout a worktree takes the local files and
+# settings it lacks from: WORKTREE_SOURCE_ROOT, the checkout that ran create,
+# else T3's T3CODE_PROJECT_ROOT. Empty when neither is set.
+fw::source_checkout() {
+  printf '%s' "${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-}}"
+}
+
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
 # (such as config.local.yaml) overrides an earlier one. When none of DIR's files
-# set NAME, such as on a branch that predates the setting, use the value from
-# WORKTREE_SOURCE_ROOT, the checkout that ran create, else from T3's
-# T3CODE_PROJECT_ROOT. Empty means DEFAULT.
+# set NAME, such as on a branch that predates the setting, use the source
+# checkout's value. Empty means DEFAULT.
 fw::setting() {
-  local dir item value=
-  local source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-}}
+  local dir item source value=
+  source=$(fw::source_checkout)
   for dir in "$1" ${source:+"$source"}; do
     [[ -f "$dir/.ddev/config.yaml" ]] || continue
     while IFS= read -r item; do
@@ -1256,10 +1262,9 @@ fw::start_steps() {
   ) || exit 1
 
   # Copy local files first, so a copied config.local.yaml sets the name and
-  # hostnames. Creation names its source checkout. Otherwise use T3's hint, then
-  # the main checkout.
-  source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
-  fw::copy_files "$source"
+  # hostnames.
+  source=$(fw::source_checkout)
+  fw::copy_files "${source:-$FW_PRIMARY_ROOT}"
   # Read after copying, so a copied config.local.yaml can turn the mount off.
   # While it's off, files the add-on didn't write at its paths don't matter.
   if fw::mounts_git; then
