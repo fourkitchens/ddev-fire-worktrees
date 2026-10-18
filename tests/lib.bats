@@ -91,7 +91,6 @@ EOF
   printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
   printf 'web_environment: [WORKTREE_BUILD_COMMAND=my-build]\n' >"${SITE}/.ddev/config.local.yaml"
 
-  unset T3CODE_PROJECT_ROOT
   WORKTREE_SOURCE_ROOT="${SOURCE}"
   run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
   assert_output "team"
@@ -109,31 +108,6 @@ EOF
   WORKTREE_SOURCE_ROOT="${TESTDIR}/missing"
   run fw::setting "${SITE}" WORKTREE_DB primary
   assert_success
-  assert_output "primary"
-}
-
-@test "settings a worktree's config files lack come from T3CODE_PROJECT_ROOT, unless create names a checkout" {
-  # The checkout T3 names, and one that ran create, each with its own prefix.
-  T3_ROOT="${TESTDIR}/t3-root"
-  SOURCE="${TESTDIR}/source"
-  mkdir -p "${T3_ROOT}/.ddev" "${SOURCE}/.ddev"
-  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=t3\n  - WORKTREE_DB=fresh\n' >"${T3_ROOT}/.ddev/config.yaml"
-  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=create\n' >"${SOURCE}/.ddev/config.yaml"
-  # A branch from before them.
-  printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
-
-  unset WORKTREE_SOURCE_ROOT
-  T3CODE_PROJECT_ROOT="${T3_ROOT}"
-  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
-  assert_output "t3"
-  run fw::setting "${SITE}" WORKTREE_DB primary
-  assert_output "fresh"
-
-  WORKTREE_SOURCE_ROOT="${SOURCE}"
-  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
-  assert_output "create"
-  # Only one checkout fills in settings, so T3's WORKTREE_DB doesn't apply.
-  run fw::setting "${SITE}" WORKTREE_DB primary
   assert_output "primary"
 }
 
@@ -349,7 +323,7 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   assert_output --partial "Configured DDEV project zz-feature-x-"
@@ -367,7 +341,7 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   local f
@@ -389,7 +363,7 @@ extra\.zz-feature-x-[0-9]+$'
 
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   assert_line "Warning: Skipping ../outside.txt in WORKTREE_COPY_FILES; use a path inside the project."
@@ -408,37 +382,87 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${WT}" fresh false
   assert_success
   assert_line "Configured DDEV project mysite-feature-add-retry-logic-2792006950"
   assert_equal "$(fw::generated_name "${WT}")" mysite-feature-add-retry-logic-2792006950
 }
 
-@test "copies local files from T3CODE_PROJECT_ROOT rather than the main checkout" {
-  printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
-  printf '/.ddev/config.local.yaml\n/web/sites/default/settings.local.php\n' >"${SITE}/.gitignore"
+# old_branch_site: a main checkout on a commit with the team's settings, and a
+# worktree, WT, on a branch from before them. Writes a dump, DUMP, to start
+# from, so startup builds.
+old_branch_site() {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  printf '/notes.txt\n' >"${SITE}/.gitignore"
   git_site
-  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
-  # The checkout T3 names has both files on the default WORKTREE_COPY_FILES
-  # list. The main checkout has only an older settings.local.php.
-  T3_ROOT="${TESTDIR}/t3-root"
-  mkdir -p "${T3_ROOT}/.ddev" "${T3_ROOT}/web/sites/default" "${SITE}/web/sites/default"
-  printf 'xdebug_enabled: true\n' >"${T3_ROOT}/.ddev/config.local.yaml"
-  echo '<?php // from T3' >"${T3_ROOT}/web/sites/default/settings.local.php"
-  echo '<?php // from the main checkout' >"${SITE}/web/sites/default/settings.local.php"
+  WT="${TESTDIR}/site-feature-old"
+  git -C "${SITE}" worktree add -q -b feature/old "${WT}"
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n  - WORKTREE_COPY_FILES=notes.txt\n  - WORKTREE_BUILD_COMMAND=echo team build\n' >"${SITE}/.ddev/config.yaml"
+  git -C "${SITE}" -c user.email=test@example.com -c user.name=Test commit -qam 'Add the team settings'
+  echo 'from the main checkout' >"${SITE}/notes.txt"
+  DUMP="${TESTDIR}/site-db.sql.gz"
+  touch "${DUMP}"
+}
 
-  # Start without Docker or DDEV.
+@test "a branch older than the team's settings starts with the main checkout's prefix, copy list and build command" {
+  old_branch_site
+
+  # Start without Docker or DDEV, and without create naming a checkout.
   ddev() { :; }
   docker() { :; }
   unset WORKTREE_SOURCE_ROOT
-  T3CODE_PROJECT_ROOT="${T3_ROOT}"
-  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  run fw::start_worktree "${WT}" "${DUMP}" true
   assert_success
-  assert_output --partial "Copied .ddev/config.local.yaml"
-  assert_output --partial "Copied web/sites/default/settings.local.php"
-  run cat "${TESTDIR}/site-feature-x/web/sites/default/settings.local.php"
-  assert_output '<?php // from T3'
+  assert_line --regexp '^Configured DDEV project team-feature-old-[0-9]+$'
+  assert_line "Copied notes.txt"
+  assert_line "Building with: echo team build"
+  assert_line "team build"
+  run cat "${WT}/notes.txt"
+  assert_output 'from the main checkout'
+}
+
+# other_checkout: after old_branch_site, another worktree, OTHER, whose own
+# settings and local file differ from the main checkout's.
+other_checkout() {
+  OTHER="${TESTDIR}/site-other"
+  git -C "${SITE}" worktree add -q -b other "${OTHER}"
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_NAME_PREFIX=other\n  - WORKTREE_COPY_FILES=notes.txt\n' >"${OTHER}/.ddev/config.yaml"
+  echo 'from the other checkout' >"${OTHER}/notes.txt"
+}
+
+@test "the checkout that ran create gives startup its settings and local files, not the main checkout's" {
+  old_branch_site
+  other_checkout
+
+  ddev() { :; }
+  docker() { :; }
+  WORKTREE_SOURCE_ROOT="${OTHER}"
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  assert_line --regexp '^Configured DDEV project other-feature-old-[0-9]+$'
+  assert_line "Copied notes.txt"
+  # Only one checkout fills in settings, so the main checkout's build command
+  # doesn't apply.
+  refute_output --partial "team build"
+  run cat "${WT}/notes.txt"
+  assert_output 'from the other checkout'
+}
+
+@test "startup ignores T3CODE_PROJECT_ROOT" {
+  old_branch_site
+  other_checkout
+
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT
+  T3CODE_PROJECT_ROOT="${OTHER}"
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  assert_line --regexp '^Configured DDEV project team-feature-old-[0-9]+$'
+  assert_line "Building with: echo team build"
+  run cat "${WT}/notes.txt"
+  assert_output 'from the main checkout'
 }
 
 @test "prune lists unregistered projects with the main checkout's prefix from any checkout" {
@@ -459,7 +483,7 @@ extra\.zz-feature-x-[0-9]+$'
   }
   ddev() { :; }
   export -f ddev docker
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   cd "${TESTDIR}/site-feature-old"
   run "${DIR}/commands/host/fire-worktree-prune"
   assert_success
@@ -468,6 +492,24 @@ extra\.zz-feature-x-[0-9]+$'
   assert_line "  team-gone-2"
   assert_line "  team-gone-4"
   refute_output --partial other-gone-3
+}
+
+@test "prune lists unregistered projects with the default prefix from a checkout with the team's prefix" {
+  old_branch_site
+
+  # A project that a worktree on a branch older than the prefix got from an
+  # earlier version, which didn't ask the main checkout.
+  docker() {
+    case $* in
+      'volume ls -q') printf 'mysite-feature-old-1-mariadb\n' ;;
+    esac
+  }
+  ddev() { :; }
+  export -f ddev docker
+  cd "${SITE}"
+  run "${DIR}/commands/host/fire-worktree-prune"
+  assert_success
+  assert_line "  mysite-feature-old-1"
 }
 
 @test "parallel registry writes keep every entry" {
@@ -531,7 +573,7 @@ extra\.zz-feature-x-[0-9]+$'
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   for i in 1 2 3 4; do
     (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
   done
@@ -545,6 +587,102 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output 1
 }
 
+@test "start points at prune when the registry lists environments whose checkout is gone, and keeps them" {
+  git_worktree
+  fw::start_worktree "${WT}" fresh false >/dev/null
+  local name registry
+  for name in kept away; do
+    git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-feature-$name"
+    fw::start_worktree "${TESTDIR}/site-feature-$name" fresh false >/dev/null
+  done
+  # A worktree an agent tool deleted without running anything, one on a drive
+  # that isn't mounted, and one that's still there.
+  printf 'mysite-gone-1\t%s\n' "${TESTDIR}/site-feature-gone-1" >>"${SITE}/.git/fire-worktrees"
+  registry=$(sort "${SITE}/.git/fire-worktrees")
+  mv "${TESTDIR}/site-feature-away" "${TESTDIR}/unmounted"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+  assert_equal "$(sort "${SITE}/.git/fire-worktrees")" "${registry}"
+
+  # A drive that's mounted again brings its checkout back.
+  mv "${TESTDIR}/unmounted" "${TESTDIR}/site-feature-away"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes"
+}
+
+@test "start says nothing about prune when every recorded checkout is there" {
+  git_worktree
+  git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
+
+  # Run the command itself, which sets -e, without Docker or DDEV.
+  export -f ddev docker
+  fw::start_worktree "${TESTDIR}/site-feature-kept" fresh false >/dev/null
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-start" --db=fresh --no-build
+  assert_success
+  assert_output --partial "Worktree URLs:"
+  refute_output --partial "lost"
+  refute_output --partial "fire-worktree-prune"
+}
+
+@test "prune --yes deletes every environment the startup notice counts" {
+  git_worktree
+  local name gone
+  for name in pruned listed; do
+    git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-$name"
+    fw::start_worktree "${TESTDIR}/site-$name" fresh false >/dev/null
+  done
+  # Two started worktrees an agent tool deleted: git worktree prune already
+  # dropped one, and Git still lists the other.
+  rm -rf "${TESTDIR}/site-pruned"
+  git -C "${SITE}" worktree prune
+  rm -rf "${TESTDIR}/site-listed"
+  run git -C "${SITE}" worktree list
+  assert_output --partial "${TESTDIR}/site-listed"
+  refute_output --partial "${TESTDIR}/site-pruned"
+  gone=$(grep -F -e site-pruned -e site-listed "${SITE}/.git/fire-worktrees" | cut -f1 | sort)
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+
+  ddev() {
+    if [[ $1 == delete ]]; then
+      echo "${*: -1}" >>"${TESTDIR}/deleted"
+    fi
+  }
+  export -f ddev docker
+  export TESTDIR
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-prune" --yes
+  assert_success
+  assert_line "Pruned."
+  run sort "${TESTDIR}/deleted"
+  assert_output "${gone}"
+
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "lost"
+}
+
+@test "start leaves out a moved worktree, whose environment prune keeps" {
+  git_worktree
+  git -C "${SITE}" worktree add -q -b feature/old "${TESTDIR}/site-old"
+  fw::start_worktree "${TESTDIR}/site-old" fresh false >/dev/null
+  # Its registry entry names the old path until it starts again.
+  git -C "${SITE}" worktree move "${TESTDIR}/site-old" "${TESTDIR}/site-moved"
+
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "lost"
+  export -f ddev docker
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-prune" --yes
+  assert_success
+  assert_output "No DDEV projects to prune."
+}
+
 # git_worktree: a PHP site in Git with a linked worktree WT on feature/x, and
 # ddev and docker stubbed out.
 git_worktree() {
@@ -554,7 +692,7 @@ git_worktree() {
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
 }
 
 @test "start mounts the shared Git directory read-only in the web container" {
@@ -748,7 +886,7 @@ YAML
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
   assert_failure
   NAME=$(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)
@@ -786,7 +924,7 @@ YAML
   ddev() { :; }
   docker() { :; }
   export -f ddev docker
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   cd "${WT}"
   # The main checkout has no snapshot for --db=latest to reuse.
   run "${DIR}/commands/host/fire-worktree-start" --db=latest
@@ -938,7 +1076,7 @@ drupal_worktree() {
   git_site
   WT="${TESTDIR}/site-feature-x"
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   ddev() {
     if [[ "$*" == 'drush uli --no-browser --uri='* ]]; then
       echo "${4#--uri=}/user/reset/1/abc/def/login"
@@ -1319,7 +1457,7 @@ copied_worktree() {
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
   DUMP="${TESTDIR}/site-db.sql.gz"
   touch "${DUMP}"
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   ddev() { [[ "$1" != mysql ]] || echo "${TABLES}"; }
   docker() { :; }
 }
@@ -1470,7 +1608,7 @@ scaffold_worktree() {
   WT="${TESTDIR}/site-feature-x"
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
   SCAFFOLD='web/README.md'
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   ddev() {
     local f
     if [[ "$*" == 'composer install' ]]; then
@@ -1603,15 +1741,6 @@ scaffold_worktree() {
   mkdir -p "${OTHER}/web"
   echo '# from the other worktree' >"${OTHER}/web/.gitignore"
 
-  T3CODE_PROJECT_ROOT="${OTHER}"
-  run fw::start_worktree "${WT}" fresh false
-  assert_success
-  assert_line "Copied web/.gitignore from the main checkout"
-  run cat "${WT}/web/.gitignore"
-  assert_output "/README.md"
-
-  rm "${WT}/web/.gitignore"
-  unset T3CODE_PROJECT_ROOT
   WORKTREE_SOURCE_ROOT="${OTHER}"
   run fw::start_worktree "${WT}" fresh false
   assert_success

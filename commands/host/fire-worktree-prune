@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #ddev-generated
 
-## Description: Delete DDEV projects whose worktree checkout is gone, such as after T3 deletes a thread
+## Description: Delete DDEV projects whose worktree checkout is gone, such as after an agent tool deletes a worktree
 ## Usage: fire-worktree-prune [--yes]
 ## Example: ddev fire-worktree-prune\nddev fire-worktree-prune --yes
 ## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Delete what the dry run lists"}]
@@ -29,45 +29,35 @@ fw::context "$PWD"
 registry=$(fw::registry_file)
 
 # Names of environments that still have a checkout.
-live=
-while IFS= read -r line; do
-  case $line in
-    'worktree '*)
-      path=${line#worktree }
-      if [[ -d "$path" ]]; then
-        live="$live$(fw::generated_name "$path")"$'\n'
-      fi
-      ;;
-  esac
-done < <(git -C "$FW_ROOT" worktree list --porcelain)
+live=$(fw::live_names)
 
+# Startup's notice counts the same entries.
 orphans=
 stale=
-if [[ -f "$registry" ]]; then
-  while IFS=$'\t' read -r name path; do
-    [[ -n "$name" ]] || continue
-    if printf '%s' "$live" | grep -qxF "$name"; then
-      continue
-    fi
-    if fw::has_environment "$name"; then
-      orphans="$orphans$name"$'\t'"$path"$'\n'
-    else
-      stale="$stale$name"$'\n'
-    fi
-  done <"$registry"
-fi
+while IFS=$'\t' read -r name path; do
+  if fw::has_environment "$name"; then
+    orphans="$orphans$name"$'\t'"$path"$'\n'
+  else
+    stale="$stale$name"$'\n'
+  fi
+done < <(fw::gone_entries)
 
 # Projects from the project-local commands this add-on replaced have no registry
 # entry, and neither do volumes that earlier versions of prune left behind. Their
 # names can't prove which clone created them, so only list them. A worktree on
-# a branch without WORKTREE_NAME_PREFIX takes the prefix of the checkout that
-# created it, so look for this checkout's prefix and the main checkout's.
+# a branch without WORKTREE_NAME_PREFIX takes its source checkout's prefix, or
+# took the default before startup asked the main checkout, so look for this
+# checkout's prefix, the main checkout's and the default.
 primary=$(fw::primary_name)
 prefixes=$(
-  for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do
-    fw::slug "$(fw::setting "$root" WORKTREE_NAME_PREFIX "$primary")" 12
+  {
+    for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do
+      fw::slug "$(fw::setting "$root" WORKTREE_NAME_PREFIX "$primary")" 12
+      echo
+    done
+    fw::slug "$primary" 12
     echo
-  done | sort -u | paste -sd '|' -
+  } | sort -u | paste -sd '|' -
 )
 unregistered=
 while IFS= read -r name; do

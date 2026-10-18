@@ -226,14 +226,21 @@ fw::web_environment() {
     END { for (j = 1; j <= n; j++) print entry[order[j]] }'
 }
 
+# fw::source_checkout: the checkout a worktree takes the local files and
+# settings it lacks from: WORKTREE_SOURCE_ROOT, the checkout that ran create,
+# else the main checkout. Empty in a bare repository. WORKTREE_SOURCE_ROOT is
+# create's own, not an input for anything else to set.
+fw::source_checkout() {
+  printf '%s' "${WORKTREE_SOURCE_ROOT:-${FW_PRIMARY_ROOT:-}}"
+}
+
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
 # (such as config.local.yaml) overrides an earlier one. When none of DIR's files
-# set NAME, such as on a branch that predates the setting, use the value from
-# WORKTREE_SOURCE_ROOT, the checkout that ran create, else from T3's
-# T3CODE_PROJECT_ROOT. Empty means DEFAULT.
+# set NAME, such as on a branch that predates the setting, use the source
+# checkout's value. Empty means DEFAULT.
 fw::setting() {
-  local dir item value=
-  local source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-}}
+  local dir item source value=
+  source=$(fw::source_checkout)
   for dir in "$1" ${source:+"$source"}; do
     [[ -f "$dir/.ddev/config.yaml" ]] || continue
     while IFS= read -r item; do
@@ -506,6 +513,55 @@ fw::registry_remove() {
 
 fw::registry_add() {
   fw::with_registry_lock fw::registry_put "$1" "$2"
+}
+
+# fw::live_names: the project names in the generated configs of the worktrees
+# Git lists for this repository whose checkout is there, one per line.
+fw::live_names() {
+  local line path
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        if [[ -d "$path" ]]; then
+          fw::generated_name "$path"
+          echo
+        fi
+        ;;
+    esac
+  done < <(git -C "$FW_ROOT" worktree list --porcelain)
+}
+
+# fw::gone_entries: the registry's "<name><TAB><path>" lines whose checkout is
+# gone, which prune deletes: no checkout Git lists holds the name. A worktree
+# moved with git worktree move keeps its name, so it isn't gone. Reads only the
+# registry, Git and the filesystem.
+fw::gone_entries() {
+  local file live name path
+  file=$(fw::registry_file)
+  [[ -f "$file" ]] || return 0
+  live=$(fw::live_names)
+  while IFS=$'\t' read -r name path; do
+    [[ -n "$name" ]] || continue
+    if ! grep -qxF "$name" <<<"$live"; then
+      printf '%s\t%s\n' "$name" "$path"
+    fi
+  done <"$file"
+}
+
+# fw::notice_gone_checkouts: say how many registry entries' checkouts are gone,
+# such as after an agent tool deleted worktrees without running anything, and
+# how to delete their environments. Asks fw::gone_entries, as prune does, so it
+# counts what prune deletes. Changes nothing and doesn't ask Docker: a checkout
+# on a drive that isn't mounted looks gone too.
+fw::notice_gone_checkouts() {
+  local count
+  count=$(fw::gone_entries | awk 'END { print NR }')
+  if [[ "$count" == 1 ]]; then
+    echo '1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes'
+  elif [[ "$count" -gt 1 ]]; then
+    echo "$count worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+  fi
 }
 
 # fw::exclude_generated: exclude the files startup writes in a worktree from
@@ -1259,9 +1315,8 @@ fw::start_steps() {
   ) || exit 1
 
   # Copy local files first, so a copied config.local.yaml sets the name and
-  # hostnames. Creation names its source checkout. Otherwise use T3's hint, then
-  # the main checkout.
-  source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
+  # hostnames.
+  source=$(fw::source_checkout)
   fw::copy_files "$source"
   # Read after copying, so a copied config.local.yaml can turn the mount off.
   # While it's off, files the add-on didn't write at its paths don't matter.
@@ -1308,6 +1363,7 @@ fw::start_steps() {
   fi
   fw::registry_add "$FW_NAME" "$FW_ROOT" || exit 1
   printf 'Configured DDEV project %s\n' "$FW_NAME"
+  fw::notice_gone_checkouts
   while IFS= read -r item; do
     [[ -n "$item" ]] || continue
     fw::warn "This worktree inherits $item from web_environment, which points it at the primary site. Build the value from \${DDEV_SITENAME}.\${DDEV_TLD} or \$DDEV_PRIMARY_URL instead."

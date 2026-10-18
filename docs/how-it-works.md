@@ -36,8 +36,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Hostnames.** Each `additional_hostnames` entry is rewritten for the worktree, and
   `additional_fqdns` and fixed host ports are left out. See
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
-* **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
-  from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
+* **Local files.** Startup copies `WORKTREE_COPY_FILES` from the source checkout: the checkout that
+  ran `create`, else your main checkout. It never overwrites a file.
 * **Scaffold `.gitignore` files.** For each untracked file in the worktree, startup asks your main
   checkout's Git which file ignores it. It copies that file from the main checkout when it's a
   `.gitignore` inside the project, the worktree has no file there, and the main checkout ignores it
@@ -47,8 +47,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   from, since a source checkout that is another worktree may lack them as well. Startup never overwrites a file or changes the main
   checkout.
 * **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. A
-  setting those files don't set comes from the checkout that ran `create`, else from
-  `T3CODE_PROJECT_ROOT`.
+  setting those files don't set, such as on a branch older than the setting, comes from the source
+  checkout. When `create` ran from another worktree, the main checkout doesn't fill in what that
+  worktree lacks too.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.
@@ -63,11 +64,17 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   them. `ddev version` shows the directory as `global-ddev-dir`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
-  Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`
-  can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
-  Compose labelled with the project. It lists, but never deletes, older worktree projects and
-  leftover volumes that match the prefix of the checkout you run it in or of your main checkout,
-  since another clone may own them.
+  Prune deletes only recorded projects whose checkout is gone: no checkout that Git lists for the
+  repository has the project's name in its generated config, so a worktree moved with
+  `git worktree move` keeps its environment. Without the checkout, `ddev delete` can't find add-on
+  services' volumes, such as Solr's, so prune also deletes every volume Docker Compose labelled
+  with the project. It lists, but never deletes, older worktree projects and leftover volumes that
+  match the prefix of the checkout you run it in, of your main checkout, or the default prefix, the
+  main checkout's project name, which earlier versions gave a worktree on a branch older than the
+  team's prefix. Another clone may own them. Startup counts recorded projects whose checkout is
+  gone the same way and prints a one-line notice naming `ddev fire-worktree-prune --yes`. It reads
+  only the registry, Git and the filesystem, makes no Docker calls, and changes nothing, since a
+  checkout on a drive that isn't mounted looks gone too.
 * **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
   worktree before its first start, when DDEV would treat it as your main project, to overwrite a
   file at a generated file's path that they didn't write, or to remove a checkout with uncommitted

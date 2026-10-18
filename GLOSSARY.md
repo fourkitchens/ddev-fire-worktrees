@@ -12,7 +12,7 @@ _Avoid_: primary checkout
 
 **Source checkout**:
 The checkout a worktree's startup copies local files and settings from: the checkout that ran
-`create`, else `T3CODE_PROJECT_ROOT`, else the main checkout.
+`create`, else the main checkout.
 _Avoid_: creating checkout
 
 **Primary project**:
@@ -22,6 +22,11 @@ The DDEV project of the main checkout.
 The main checkout's `.git` directory, which holds the objects and refs every worktree shares, plus
 each linked worktree's own metadata.
 _Avoid_: common dir, shared repository, main .git
+
+**Agent tool**:
+An application that creates worktrees of a project and runs coding agents in them, such as T3,
+Orca or Conductor.
+_Avoid_: agent IDE, orchestrator, worktree manager
 
 **Git mount**:
 What startup adds to a worktree's web container so Git works there: the shared Git directory,
