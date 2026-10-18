@@ -585,17 +585,11 @@ other_checkout() {
 }
 
 @test "start points at prune when the registry lists environments whose checkout is gone, and keeps them" {
-  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
-  git_site
-  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
-
-  # Start without Docker or DDEV.
-  ddev() { :; }
-  docker() { :; }
-  unset WORKTREE_SOURCE_ROOT
+  git_worktree
+  fw::start_worktree "${WT}" fresh false >/dev/null
   local name registry
-  for name in x kept away; do
-    [[ $name == x ]] || git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-feature-$name"
+  for name in kept away; do
+    git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-feature-$name"
     fw::start_worktree "${TESTDIR}/site-feature-$name" fresh false >/dev/null
   done
   # A worktree an agent tool deleted without running anything, one on a drive
@@ -603,30 +597,24 @@ other_checkout() {
   printf 'mysite-gone-1\t%s\n' "${TESTDIR}/site-feature-gone-1" >>"${SITE}/.git/fire-worktrees"
   registry=$(sort "${SITE}/.git/fire-worktrees")
   mv "${TESTDIR}/site-feature-away" "${TESTDIR}/unmounted"
-  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  run fw::start_worktree "${WT}" fresh false
   assert_success
   assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
   assert_equal "$(sort "${SITE}/.git/fire-worktrees")" "${registry}"
 
   # A drive that's mounted again brings its checkout back.
   mv "${TESTDIR}/unmounted" "${TESTDIR}/site-feature-away"
-  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  run fw::start_worktree "${WT}" fresh false
   assert_success
   assert_line "1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes"
 }
 
 @test "start says nothing about prune when every recorded checkout is there" {
-  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
-  git_site
-  WT="${TESTDIR}/site-feature-x"
-  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  git_worktree
   git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
 
   # Run the command itself, which sets -e, without Docker or DDEV.
-  ddev() { :; }
-  docker() { :; }
   export -f ddev docker
-  unset WORKTREE_SOURCE_ROOT
   fw::start_worktree "${TESTDIR}/site-feature-kept" fresh false >/dev/null
   cd "${WT}"
   run "${DIR}/commands/host/fire-worktree-start" --db=fresh --no-build
