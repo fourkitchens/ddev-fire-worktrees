@@ -508,6 +508,26 @@ fw::registry_add() {
   fw::with_registry_lock fw::registry_put "$1" "$2"
 }
 
+# fw::notice_gone_checkouts: say how many registry entries' checkouts are gone,
+# such as after an agent tool deleted worktrees without running anything, and
+# how to delete their environments. Reads only the registry and the filesystem,
+# and changes neither: a checkout on a drive that isn't mounted looks gone too.
+fw::notice_gone_checkouts() {
+  local file name path count=0
+  file=$(fw::registry_file)
+  [[ -f "$file" ]] || return 0
+  while IFS=$'\t' read -r name path; do
+    if [[ -n "$name" && ! -d "$path" ]]; then
+      count=$((count + 1))
+    fi
+  done <"$file"
+  if [[ "$count" == 1 ]]; then
+    echo '1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes'
+  elif [[ "$count" -gt 1 ]]; then
+    echo "$count worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+  fi
+}
+
 # fw::exclude_generated: exclude the files startup writes in a worktree from
 # Git. Hold the registry lock, so parallel starts add each line once.
 fw::exclude_generated() {
@@ -1305,6 +1325,7 @@ fw::start_steps() {
   fi
   fw::registry_add "$FW_NAME" "$FW_ROOT" || exit 1
   printf 'Configured DDEV project %s\n' "$FW_NAME"
+  fw::notice_gone_checkouts
   while IFS= read -r item; do
     [[ -n "$item" ]] || continue
     fw::warn "This worktree inherits $item from web_environment, which points it at the primary site. Build the value from \${DDEV_SITENAME}.\${DDEV_TLD} or \$DDEV_PRIMARY_URL instead."
