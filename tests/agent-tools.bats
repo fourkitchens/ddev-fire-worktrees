@@ -127,6 +127,8 @@ NO_TEARDOWN=(T3)
 tool_line() {
   case "$1:$2" in
     T3:setup) t3_action 'Start worktree' ;;
+    Orca:setup) section Orca | yaml_block setup | unquote yaml-block ;;
+    Orca:teardown) section Orca | yaml_block archive | unquote yaml-block ;;
     *)
       echo "tool_line has no case for the ${2} line in the ${1} section" >&2
       return 1
@@ -145,12 +147,23 @@ json_member() {
   sed -nE 's/.*"'"$1"'": ("([^"\\]|\\.)*").*/\1/p'
 }
 
+# yaml_block KEY: the first line of the block scalar of the first "KEY: |" on
+# stdin, indentation included.
+yaml_block() {
+  awk -v key="$1: |" '
+    inside { print; exit }
+    { line = $0; sub(/^ +/, "", line); inside = (line == key) }
+  '
+}
+
 # unquote FORMAT: undo FORMAT's quoting of the string literal on stdin.
 unquote() {
   case $1 in
     # Strip the quotes and the backslash of each escape; the lines need no
     # escapes but \" and \\.
     json) sed -E 's/^"(.*)"$/\1/; s/\\(.)/\1/g' ;;
+    # A block scalar's only quoting is its indentation.
+    yaml-block) sed -E 's/^ +//' ;;
     *)
       echo "unquote knows no format ${1}" >&2
       return 1

@@ -138,3 +138,27 @@ thread. If you forget, **Find orphaned worktree environments** lists what's left
 with `ddev fire-worktree-prune --yes`. T3's storage cleanup can also delete worktrees without
 running anything, which startup's notice about lost checkouts catches. Like the setup line, both
 actions fall back to the main checkout's copy on a branch older than the add-on.
+
+## Orca
+
+For [Orca](https://www.onorca.dev), add this to the project's `orca.yaml`:
+
+```yaml
+scripts:
+  setup: |
+    if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
+  archive: |
+    if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
+setupAgentStartupPolicy: wait-for-setup
+```
+
+`setupAgentStartupPolicy: wait-for-setup` keeps the agent waiting until startup finishes.
+
+Orca takes the setup script from the new worktree's `orca.yaml`, so a worktree on a branch without
+the file, such as one older than the recipe, runs no setup. To start those too, each person can put
+the setup line in Orca's own hook, in Settings → Repository, set to local-only or run-both; that hook
+runs on every branch. Local-only ignores `orca.yaml`'s scripts, so give the hook the teardown line
+as its archive script too.
+
+Orca takes the archive script from the main checkout's `orca.yaml`, runs it with no terminal, and
+stops it after 2 minutes. `orca worktree rm` runs it only with `--run-hooks`.
