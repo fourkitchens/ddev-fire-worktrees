@@ -60,9 +60,9 @@ fi
 # Projects from the project-local commands this add-on replaced have no registry
 # entry, and neither do volumes that earlier versions of prune left behind. Their
 # names can't prove which clone created them, so only list them. A worktree on
-# a branch without WORKTREE_NAME_PREFIX takes the prefix of its source checkout,
-# and before this version could get the default, so look for this checkout's
-# prefix, the main checkout's and the default.
+# a branch without WORKTREE_NAME_PREFIX takes its source checkout's prefix, or
+# took the default before startup asked the main checkout, so look for this
+# checkout's prefix, the main checkout's and the default.
 primary=$(fw::primary_name)
 prefixes=$(
   {
