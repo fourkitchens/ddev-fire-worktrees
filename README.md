@@ -84,7 +84,7 @@ same options. See [Choosing the database](docs/databases.md).
 | [Choosing the branch](docs/branches.md) | Check out an existing branch or a pull request, fetch first, or compare a pull request with its base. |
 | [Choosing the database](docs/databases.md) | Copy, reuse or import a database, start empty, or get a new copy later. |
 | [Lando projects](docs/lando.md) | Use worktrees in a project that also has, or only has, a `.lando.yml`. |
-| [T3 and other agent tools](docs/agent-tools.md) | Start worktrees from T3, Claude Code and similar tools, find out why a start failed, and clean up after them. |
+| [Agent tools](docs/agent-tools.md) | Start and delete worktree environments from any agent tool, find out why a start failed, and clean up after them. |
 | [Migrating from project-local commands](docs/migrating.md) | Replace a project's own `worktree-*` commands and keep existing worktrees. |
 | [How it works](docs/how-it-works.md) | See what startup does and how names, hostnames, locks and prune work. |
 | [Troubleshooting](docs/troubleshooting.md) | Fix common errors and warnings. |
