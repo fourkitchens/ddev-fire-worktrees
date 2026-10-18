@@ -41,8 +41,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   `.gitignore` inside the project, the worktree has no file there, and the main checkout ignores it
   too, and prints `Copied <path> from the main checkout`. It repeats until there's nothing more to
   copy, so a `.gitignore` that another one hides is copied too. Unlike `WORKTREE_COPY_FILES`, these
-  always come from the main checkout, not the source checkout, since a source checkout that is
-  another worktree may lack them as well. Startup never overwrites a file or changes the main
+  always come from the main checkout, not the source checkout that `WORKTREE_COPY_FILES` comes
+  from, since a source checkout that is another worktree may lack them as well. Startup never overwrites a file or changes the main
   checkout.
 * **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. When
   `create` runs it, a setting those files don't set comes from the checkout that ran `create`.
