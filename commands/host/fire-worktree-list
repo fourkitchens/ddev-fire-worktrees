@@ -31,7 +31,7 @@ fw_row() {
   elif [[ -f "$path/.ddev/config.yaml" ]]; then
     if [[ "$path" == "$FW_PRIMARY_ROOT" ]]; then
       name=$(fw::project_name_of "$path")
-      branch="$branch (primary)"
+      branch="$branch (main checkout)"
     else
       name=$(fw::generated_name "$path")
     fi

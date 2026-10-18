@@ -155,7 +155,7 @@ worktree_name() {
 
   run ddev fire-worktree-list
   assert_success
-  assert_output --partial "main (primary)"
+  assert_output --partial "main (main checkout)"
   assert_line --regexp "^feature/one +${NAME} +running +0 "
 
   # Without a database, info points to startup, which copies one in. ddev start
