@@ -44,8 +44,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   always come from the main checkout, not the source checkout that `WORKTREE_COPY_FILES` comes
   from, since a source checkout that is another worktree may lack them as well. Startup never overwrites a file or changes the main
   checkout.
-* **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. When
-  `create` runs it, a setting those files don't set comes from the checkout that ran `create`.
+* **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. A
+  setting those files don't set comes from the checkout that ran `create`, else from
+  `T3CODE_PROJECT_ROOT`.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.
