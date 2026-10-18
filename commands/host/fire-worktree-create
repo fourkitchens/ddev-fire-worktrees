@@ -5,7 +5,7 @@
 ## Usage: fire-worktree-create <branch> [start-point] | --pr=<number> [--base] [branch] [--fetch] [--db=primary|latest|fresh|<snapshot or dump>] [--no-build]
 ## Example: ddev fire-worktree-create ABC-123-short-description\nddev fire-worktree-create ABC-123-short-description origin/main --db=fresh\nddev fire-worktree-create --fetch ABC-456-pushed-by-a-teammate\nddev fire-worktree-create --pr=123 --base
 ## Aliases: worktree-create
-## Flags: [{"Name":"pr","Type":"string","Usage":"Check out this pull request from origin, as a branch named after its head branch when gh can look it up, else as pr-<number>"},{"Name":"base","Usage":"With --pr, also create a worktree on the pull request's base branch, for before-and-after comparisons"},{"Name":"fetch","Usage":"Run git fetch origin before resolving branches and start points"},{"Name":"db","Type":"string","Usage":"Database for the new worktree: primary (snapshot the primary checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"}]
+## Flags: [{"Name":"pr","Type":"string","Usage":"Check out this pull request from origin, as a branch named after its head branch when gh can look it up, else as pr-<number>"},{"Name":"base","Usage":"With --pr, also create a worktree on the pull request's base branch, for before-and-after comparisons"},{"Name":"fetch","Usage":"Run git fetch origin before resolving branches and start points"},{"Name":"db","Type":"string","Usage":"Database for the new worktree: primary (snapshot the main checkout), latest (the last copy a worktree took), fresh (empty), or a snapshot or SQL dump file. Default: WORKTREE_DB, else primary"},{"Name":"no-build","Usage":"Don't run WORKTREE_BUILD_COMMAND after copying the database"}]
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
     -h | --help)
       echo "$usage"
       echo
-      echo 'Creates a worktree in a directory beside the primary checkout, then runs'
+      echo 'Creates a worktree in a directory beside the main checkout, then runs'
       echo 'fire-worktree-start there. A new branch starts from start-point, else'
       echo "WORKTREE_BASE_REF, else the remote's default branch. An existing local branch"
       echo 'is checked out as it is. A branch that only origin has gets a local branch that'
@@ -87,7 +87,7 @@ db=$(fw::db_arg "$db")
 # of any setting a branch's own config lacks, here and in startup.
 fw::context "$PWD"
 export WORKTREE_SOURCE_ROOT=$FW_ROOT
-[[ -n "$FW_PRIMARY_ROOT" ]] || fw::die 'fire-worktree-create needs a primary checkout; bare repositories are not supported.'
+[[ -n "$FW_PRIMARY_ROOT" ]] || fw::die 'fire-worktree-create needs a main checkout; bare repositories are not supported.'
 
 if [[ "$fetch" == true ]]; then
   git -C "$FW_ROOT" fetch origin || fw::die "Couldn't fetch origin."

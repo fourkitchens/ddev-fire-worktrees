@@ -61,7 +61,7 @@ fi
 # entry, and neither do volumes that earlier versions of prune left behind. Their
 # names can't prove which clone created them, so only list them. A worktree on
 # a branch without WORKTREE_NAME_PREFIX takes the prefix of the checkout that
-# created it, so look for this checkout's prefix and the primary checkout's.
+# created it, so look for this checkout's prefix and the main checkout's.
 primary=$(fw::primary_name)
 prefixes=$(
   for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do

@@ -348,13 +348,13 @@ EOF
   health_checks
 }
 
-@test "keeps legacy worktree names, handles nested worktrees, and refuses the primary" {
+@test "keeps legacy worktree names, handles nested worktrees, and refuses the main checkout" {
   set -eu -o pipefail
   install_and_start "${DIR}"
 
   run ddev fire-worktree-start
   assert_failure
-  assert_output --partial "not the primary checkout"
+  assert_output --partial "not the main checkout"
 
   # A worktree started by the project-local commands this add-on replaces.
   git worktree add -q -b legacy/x ../primary-legacy-x main
@@ -366,7 +366,7 @@ EOF
   assert_equal "$(worktree_name "${LEGACY}")" "fwtest-legacy-1"
   assert_file_not_exists "${LEGACY}/.ddev/config.worktree.yaml"
 
-  # A worktree inside the primary checkout, like Claude Code's .claude/worktrees.
+  # A worktree inside the main checkout, like Claude Code's .claude/worktrees.
   cd "${PRIMARY}"
   git worktree add -q -b nested/n1 .claude/worktrees/n1 main
   cd .claude/worktrees/n1

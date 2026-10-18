@@ -1,6 +1,6 @@
 name: fire-worktrees
 
-# v1.25.4 added `ddev start --seed-snapshot`, which copies the primary checkout's
+# v1.25.4 added `ddev start --seed-snapshot`, which copies the main checkout's
 # database into a new worktree, and made nested projects defer to the registered
 # project around them, which fire-worktree-start handles.
 ddev_version_constraint: '>= v1.25.4'

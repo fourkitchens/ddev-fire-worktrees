@@ -229,8 +229,8 @@ fw::project_name_of() {
   printf '%s' "$name"
 }
 
-# fw::primary_name: the primary checkout's DDEV project name. A config.yaml
-# without name: gives each checkout a different name, so ask the primary's.
+# fw::primary_name: the main checkout's DDEV project name. A config.yaml
+# without name: gives each checkout a different name, so ask the main checkout's.
 fw::primary_name() {
   local root=${FW_PRIMARY_ROOT:-$FW_ROOT}
   [[ -f "$root/.ddev/config.yaml" ]] || root=$FW_ROOT
@@ -536,7 +536,7 @@ fw::seed_snapshot() {
       ;;
     primary | latest)
       [[ -n "$FW_PRIMARY_ROOT" && -f "$FW_PRIMARY_ROOT/.ddev/config.yaml" ]] ||
-        fw::die "No primary checkout with a DDEV project to copy the database from. Use --db=fresh."
+        fw::die "No main checkout with a DDEV project to copy the database from. Use --db=fresh."
       dir="$FW_PRIMARY_ROOT/.ddev/db_snapshots"
       if [[ "$mode" == primary ]]; then
         primary=$(fw::primary_name)
@@ -573,7 +573,7 @@ fw::seed_snapshot() {
           other=${other:-"$dir/$f"}
         done < <(ls -t "$dir" 2>/dev/null)
         if [[ -z "$newest" && -z "$other" ]]; then
-          fw::die "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
+          fw::die "The main checkout has no database snapshot to copy. Start its project, or use --db=fresh."
         fi
         if [[ "$mode" == primary ]]; then
           fw::warn "Using the older snapshot $(basename "${newest:-$other}") instead."
@@ -710,7 +710,7 @@ fw::error_line() {
 
 # fw::login_link URL: a one-time login link to the Drupal site at URL. Run it in
 # the worktree while its project is running. --uri overrides a DRUSH_OPTIONS_URI
-# the worktree inherited from the primary checkout. Drupal can print an HTML
+# the worktree inherited from the main checkout. Drupal can print an HTML
 # warning to stdout with no newline before the link, so take the last URL.
 # Without a link, it prints the first line of Drush's error instead, and fails.
 # Either way, it warns when Drush's output shows Drupal reading Git metadata.
@@ -858,7 +858,7 @@ fw::write_config() {
   {
     printf '%s\n' "$FW_MARKER"
     # Replace rather than merge these keys, so this project never claims the
-    # primary checkout's hostnames or host ports.
+    # main checkout's hostnames or host ports.
     printf 'override_config: true\nname: %s\n' "$FW_NAME"
     if [[ -n "$hosts" ]]; then
       printf 'additional_hostnames:\n'
@@ -982,7 +982,7 @@ fw::start_worktree() {
   local status pipefail=false
   fw::context "$1"
   if [[ "$FW_IS_PRIMARY" == true ]]; then
-    fw::die 'Run fire-worktree-start in a linked Git worktree, not the primary checkout.'
+    fw::die 'Run fire-worktree-start in a linked Git worktree, not the main checkout.'
   fi
   cd "$FW_ROOT" || exit 1
   fw::with_registry_lock fw::exclude_generated || exit 1
@@ -1032,7 +1032,7 @@ fw::start_steps() {
 
   # Copy local files first, so a copied config.local.yaml sets the name and
   # hostnames. Creation names its source checkout. Otherwise use T3's hint, then
-  # the primary.
+  # the main checkout.
   source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
   fw::copy_files "$source"
 
@@ -1076,7 +1076,7 @@ fw::start_steps() {
 
   if [[ -n "$FW_PRIMARY_ROOT" && "$FW_ROOT" == "$FW_PRIMARY_ROOT"/* ]]; then
     nested=true
-    fw::warn "This worktree is inside the primary checkout. If the primary project uses Mutagen, it syncs this whole worktree into its own container."
+    fw::warn "This worktree is inside the main checkout. If the primary project uses Mutagen, it syncs this whole worktree into its own container."
   fi
 
   db=${db:-$(fw::setting "$FW_ROOT" WORKTREE_DB primary)}
@@ -1136,11 +1136,11 @@ fw::refresh_worktree() {
   local db=$2 build=$3 primary what cmd on_failure seed='' dump='' empty=false build_failed=false
   fw::context "$1"
   if [[ "$FW_IS_PRIMARY" == true ]]; then
-    fw::die 'Run fire-worktree-refresh in a linked Git worktree, not the primary checkout.'
+    fw::die 'Run fire-worktree-refresh in a linked Git worktree, not the main checkout.'
   fi
   cd "$FW_ROOT" || exit 1
   # Without the generated config, DDEV gives this checkout the primary project's
-  # name, and a reset would delete the primary checkout's database.
+  # name, and a reset would delete the main checkout's database.
   FW_NAME=$(fw::generated_name "$FW_ROOT")
   primary=$(fw::primary_name)
   if [[ -n "$FW_NAME" && "$FW_NAME" == "$primary" ]]; then
