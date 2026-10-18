@@ -359,6 +359,22 @@ YAML
 extra\.zz-feature-x-[0-9]+$'
 }
 
+@test "DDEV doesn't list the generated config as custom configuration" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  run sed -n 2p "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}"
+  assert_output '#ddev-silent-no-warn'
+  fw::is_generated "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}"
+}
+
 @test "start skips WORKTREE_COPY_FILES paths outside the project" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   printf '/.ddev/config.local.yaml\n/notes..txt\n' >"${SITE}/.gitignore"
