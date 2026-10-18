@@ -181,3 +181,25 @@ expect new workspaces to use it.
 
 Conductor starts the agent alongside setup and documents no setting to make it wait, so the
 agent's first steps may come before the site is running.
+
+## Cursor
+
+For [Cursor](https://cursor.com), add this to the project's `.cursor/worktrees.json`:
+
+```json
+{
+  "setup-worktree": [
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+  ]
+}
+```
+
+Cursor reads the worktree's `.cursor/worktrees.json`, then the project root's, so a worktree on a
+branch older than the file still runs setup.
+
+Cursor has no teardown, and once it has more worktrees than `cursor.worktreeMaxCount` (25 by
+default), it deletes older ones without running anything. Rely on startup's notice and
+[`prune`](#tools-without-teardown) to clean up after it.
+
+Cursor doesn't document whether setup finishes before the agent starts, so the agent may start
+before the site is running. To check on setup, open the Output panel and select "Worktrees Setup".

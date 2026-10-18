@@ -119,7 +119,7 @@ tool_sections() {
 
 # Tool sections whose tool runs nothing before deleting a worktree, so their
 # recipes have no teardown line.
-NO_TEARDOWN=(T3)
+NO_TEARDOWN=(T3 Cursor)
 
 # tool_line TOOL setup|teardown: the line in TOOL's section of the page, with its
 # file format's quoting undone. Each tool section needs a case here: pick out
@@ -131,6 +131,7 @@ tool_line() {
     Orca:teardown) section Orca | yaml_block archive | unquote yaml-block ;;
     Conductor:setup) section Conductor | toml_key setup | unquote toml-literal ;;
     Conductor:teardown) section Conductor | toml_key archive | unquote toml-literal ;;
+    Cursor:setup) section Cursor | json_array setup-worktree | unquote json ;;
     *)
       echo "tool_line has no case for the ${2} line in the ${1} section" >&2
       return 1
@@ -147,6 +148,17 @@ t3_action() {
 # line of stdin, quotes and escapes included.
 json_member() {
   sed -nE 's/.*"'"$1"'": ("([^"\\]|\\.)*").*/\1/p'
+}
+
+# json_array KEY: the quoted string elements of the first "KEY": array on
+# stdin, one per line, quotes and escapes included. Each element is on a line of
+# its own.
+json_array() {
+  awk -v key="\"$1\": [" '
+    inside && /^ *\]/ { exit }
+    inside
+    { line = $0; sub(/^ +/, "", line); if (line == key) inside = 1 }
+  ' | sed -nE 's/^ *("([^"\\]|\\.)*"),?$/\1/p'
 }
 
 # yaml_block KEY: the first line of the block scalar of the first "KEY: |" on
