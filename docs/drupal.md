@@ -131,8 +131,24 @@ in `.ddev/fire-worktree-start.log`.
 * **Uploaded files.** Worktrees start without `sites/default/files`. Use
   [Stage File Proxy](https://www.drupal.org/project/stage_file_proxy) to fetch them from the remote
   site on demand.
-* **Branch in the environment indicator.** In a worktree, `.git` is a file that points outside the
-  container, so code that reads `../.git/HEAD` must skip the label when that path isn't readable.
+* **Branch in the environment indicator.** DDEV mounts your main checkout's `.git` directory into
+  the web container, but not a worktree's. In a worktree, `.git` is a file: Mutagen leaves it out
+  of the container, and without Mutagen it points to a path that exists only on the host. Code that
+  reads `../.git/HEAD` or runs `git` fails there, and with `display_errors` on, Drupal prints PHP
+  warnings on every page and Drush command. Skip that code when `.git/HEAD` isn't readable, so
+  worktrees show no branch:
+
+  ```php
+  $git_head = $app_root . '/../.git/HEAD';
+  if (is_readable($git_head)) {
+    $branch = preg_replace('#^ref: refs/heads/#', '', trim(file_get_contents($git_head)));
+    $config['environment_indicator.indicator']['name'] = 'Local: ' . $branch;
+  }
+  ```
+
+  Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Startup, refresh and
+  `info` warn that a file `reads Git metadata, which a worktree's container doesn't have` when
+  Drush's output shows the problem, and name the file and line when they can.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
   worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead. Startup warns about
   `web_environment` values that name your main checkout's hostnames, such as
