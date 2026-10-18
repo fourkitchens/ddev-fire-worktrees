@@ -592,6 +592,15 @@ YAML
   assert [ ! -e "${WT}/.ddev/docker-compose.fire-worktree-git.yaml" ]
 }
 
+@test "start refuses to overwrite a .git file that names no worktree" {
+  git_worktree
+  echo 'gitdir: /mnt/fire-worktrees/git/worktrees/' >"${WT}/.ddev/fire-worktree-git"
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "Refusing to overwrite .ddev/fire-worktree-git; this add-on didn't write it."
+  assert_equal "$(cat "${WT}/.ddev/fire-worktree-git")" 'gitdir: /mnt/fire-worktrees/git/worktrees/'
+}
+
 @test "start keeps the mounted .git file's inode, and leaves it alone when unchanged" {
   git_worktree
   GITFILE="${WT}/.ddev/fire-worktree-git"
@@ -821,7 +830,7 @@ drupal_site() {
   assert_output "https://mysite-feature-x.ddev.site/user/reset/1/1792195923/abc/login"
 }
 
-GIT_METADATA_ADVICE="reads Git metadata that a worktree's container can't read, so Drupal prints PHP warnings on every page and Drush command. In a worktree, .git is a file, so .git/HEAD can't be read. Get the branch from git branch --show-current instead, which works unless the worktree's Git mount is off, or skip that code when .git/HEAD isn't a readable file. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
+GIT_METADATA_ADVICE="reads Git metadata that a worktree's container can't read, so Drupal prints PHP warnings on every page and Drush command. In a worktree, .git is a file, so .git/HEAD can't be read. Skip that code when .git/HEAD isn't a readable file. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
 
 # assert_login_link_warns WARNING: in drupal_site, where ddev drush uli prints
 # what drush_uli_output prints and then a link, fw::login_link gives the link

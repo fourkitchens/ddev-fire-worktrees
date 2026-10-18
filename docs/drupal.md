@@ -133,22 +133,8 @@ in `.ddev/fire-worktree-start.log`.
   site on demand.
 * **Branch in the environment indicator.** In a worktree, `.git` is a file that points to the
   shared Git directory, not a directory, so code that reads `../.git/HEAD` fails there, and with
-  `display_errors` on, Drupal prints PHP warnings on every page and Drush command. `git` itself
-  works in a worktree's web container, because startup
-  [mounts the shared Git directory](how-it-works.md#git-in-the-web-container) there, so ask Git for
-  the branch instead:
-
-  ```php
-  $branch = trim((string) shell_exec('git -C ' . escapeshellarg($app_root) . ' branch --show-current 2>/dev/null'));
-  if ($branch !== '') {
-    $config['environment_indicator.indicator']['name'] = 'Local: ' . $branch;
-  }
-  ```
-
-  With the mount off (`WORKTREE_MOUNT_GIT=false`, or DDEV's global `no_bind_mounts`), the container
-  has no Git metadata, `git` prints nothing, and the worktree shows no branch. To keep reading
-  `.git/HEAD` instead, skip that code when `.git/HEAD` isn't a readable file, so worktrees show no
-  branch:
+  `display_errors` on, Drupal prints PHP warnings on every page and Drush command. Skip that code
+  when `.git/HEAD` isn't a readable file, so worktrees show no branch:
 
   ```php
   $git_head = $app_root . '/../.git/HEAD';
@@ -158,9 +144,13 @@ in `.ddev/fire-worktree-start.log`.
   }
   ```
 
-  Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Startup, refresh and
-  `info` warn that a file `reads Git metadata that a worktree's container can't read` when Drush's
-  output shows the problem, and name the file and line when they can.
+  Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Don't run `git` from
+  settings instead, since that starts a process on every request. In scripts, Drush commands and
+  the shell, `git branch --show-current` works in a worktree's web container through the
+  [Git mount](how-it-works.md#git-in-the-web-container), unless the mount is off
+  (`WORKTREE_MOUNT_GIT=false`, or DDEV's global `no_bind_mounts`). Startup, refresh and `info` warn
+  that a file `reads Git metadata that a worktree's container can't read` when Drush's output shows
+  the problem, and name the file and line when they can.
 * **Scaffold files in `git status`.** Drupal's Composer scaffold writes files such as
   `web/README.md`, and `.gitignore` files that hide them, but it writes the `.gitignore` files only
   when it can run Git. In a worktree's web container it can, through the Git mount, unless the mount

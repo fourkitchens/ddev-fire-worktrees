@@ -22,3 +22,8 @@ The DDEV project of the main checkout.
 The main checkout's `.git` directory, which holds the objects and refs every worktree shares, plus
 each linked worktree's own metadata.
 _Avoid_: common dir, shared repository, main .git
+
+**Git mount**:
+What startup adds to a worktree's web container so Git works there: the shared Git directory,
+mounted read-only, and a generated `.git` file, mounted read-only over the worktree's, that points
+Git at it. `WORKTREE_MOUNT_GIT=false` turns it off.

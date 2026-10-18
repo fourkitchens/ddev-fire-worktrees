@@ -69,9 +69,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   since another clone may own them.
 * **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
   worktree before its first start, when DDEV would treat it as your main project, to overwrite a
-  file they generate that they didn't write, or to remove a checkout with uncommitted work. They never delete
-  branches. `create` moves an existing branch only to fast-forward a pull request's branch that
-  tracks the pull request.
+  file at a generated file's path that they didn't write, or to remove a checkout with uncommitted
+  work. They never delete branches. `create` moves an existing branch only to fast-forward a pull
+  request's branch that tracks the pull request.
 * **Portability.** The commands are Bash 3.2 scripts that read DDEV's YAML themselves, so they need
   no `jq`, `yq` or Python.
 
@@ -79,8 +79,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 
 A linked worktree's `.git` is a file that points at its metadata in the main checkout's shared Git
 directory, a host path the web container doesn't have. With Mutagen, the container has no `.git`
-at all, because DDEV's Mutagen config ignores it. So startup mounts Git itself, the same way with
-and without Mutagen. Every `fire-worktree-start` writes two files in the worktree's `.ddev`:
+at all, because DDEV's Mutagen config ignores it. So startup adds its own Git mount, the same way
+with and without Mutagen. Every `fire-worktree-start` writes two files in the worktree's `.ddev`:
 
 * `docker-compose.fire-worktree-git.yaml` mounts the shared Git directory read-only at
   `/mnt/fire-worktrees/git`, and the next file read-only over `/var/www/html/.git`.
@@ -100,9 +100,11 @@ Commands that write, such as `git commit`, fail with "Read-only file system". Ru
 * **Why a fixed path.** Mounting at the host path would need a `.git` file mounted under Mutagen
   anyway, and would recreate your home directory's path in the container.
 * **A moved main checkout.** The mounts use `create_host_path: false`, so after you move the main
-  checkout, `ddev start` fails with "bind source path does not exist" rather than mounting an empty
-  directory. Run `git worktree repair` from the main checkout, then `ddev fire-worktree-start`,
-  which writes the new path.
+  checkout, `ddev start` and `ddev restart` fail with "bind source path does not exist" rather than
+  mounting an empty directory, and `ddev fire-worktree-start` stops earlier, saying the worktree
+  "is not inside a Git checkout", because the worktree's own `.git` file names the old path too.
+  Run `git worktree repair` from the main checkout, then `ddev fire-worktree-start`, which writes
+  the new path.
 * **Reruns.** Startup rewrites both files on every run, and refuses to overwrite either one it
   didn't write. A single-file mount keeps showing the file it mounted, so startup changes
   `fire-worktree-git` only when its text changes, and in place. `fire-worktree-refresh`,
