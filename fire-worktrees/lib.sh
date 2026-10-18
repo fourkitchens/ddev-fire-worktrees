@@ -855,22 +855,41 @@ fw::copy_gitignores() {
   done
 }
 
-# fw::untracked: FW_ROOT's untracked files, as git status lists them.
+# fw::untracked: FW_ROOT's untracked files, each one, not just their directories.
 fw::untracked() {
-  git -C "$FW_ROOT" ls-files --others --exclude-standard --directory --no-empty-directory
+  git -C "$FW_ROOT" ls-files --others --exclude-standard
 }
 
-# fw::warn_untracked BEFORE: warn about FW_ROOT's untracked files that aren't in
-# BEFORE, an earlier fw::untracked.
+# fw::new_untracked BEFORE: FW_ROOT's untracked files that aren't in BEFORE, an
+# earlier fw::untracked. Like git status, it lists a directory that's untracked
+# as a whole as one line, unless it held untracked files before; then it lists
+# that directory's new files.
+fw::new_untracked() {
+  git -C "$FW_ROOT" ls-files --others --exclude-standard --directory --no-empty-directory |
+    FW_BEFORE=$1 FW_NOW=$(fw::untracked) awk '
+      BEGIN {
+        n = split(ENVIRON["FW_BEFORE"], f, "\n"); for (i = 1; i <= n; i++) old[f[i]] = 1
+        n = split(ENVIRON["FW_NOW"], f, "\n"); for (i = 1; i <= n; i++) if (!(f[i] in old)) new[f[i]] = 1
+      }
+      !/\/$/ { if ($0 in new) print; next }
+      {
+        for (o in old) if (index(o, $0) == 1) { for (p in new) if (index(p, $0) == 1) print p; next }
+        for (p in new) if (index(p, $0) == 1) { print; next }
+      }' | LC_ALL=C sort
+}
+
+# fw::warn_untracked BEFORE: warn about the untracked files startup created
+# since BEFORE, an earlier fw::untracked.
 fw::warn_untracked() {
-  local new
-  new=$(fw::untracked | FW_BEFORE=$1 awk '
-    BEGIN { n = split(ENVIRON["FW_BEFORE"], old, "\n"); for (i = 1; i <= n; i++) seen[old[i]] = 1 }
-    !seen[$0] { print "  " $0 }')
-  [[ -n "$new" ]] || return 0
-  fw::warn "Startup created untracked files that nothing ignores:
-$new
-fire-worktree-remove refuses to delete this worktree until they're gone. If every checkout gets them, list them in the project's .gitignore."
+  local f
+  local -a new=()
+  while IFS= read -r f; do
+    new+=("$f")
+  done < <(fw::new_untracked "$1")
+  ((${#new[@]})) || return 0
+  fw::warn 'Startup created untracked files that nothing ignores:'
+  printf '  %s\n' "${new[@]}" >&2
+  printf "fire-worktree-remove refuses to delete this worktree until they're gone. If every checkout gets them, list them in the project's .gitignore.\n" >&2
 }
 
 # fw::write_config PRIMARY: write FW_ROOT's generated DDEV config for FW_NAME.

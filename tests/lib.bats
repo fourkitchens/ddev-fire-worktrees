@@ -1233,6 +1233,22 @@ scaffold_worktree() {
   refute_output --partial "notes.txt"
 }
 
+@test "the warning lists a new file inside a directory that was already untracked" {
+  scaffold_worktree
+  mkdir -p "${WT}/notes"
+  echo mine >"${WT}/notes/mine.txt"
+  SCAFFOLD='web/README.md notes/out.txt dist/css/app.css'
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Warning: Startup created untracked files that nothing ignores:"
+  assert_line "  notes/out.txt"
+  # A directory that is new in its entirety is one line, as in git status.
+  assert_line "  dist/"
+  refute_output --partial "app.css"
+  refute_output --partial "mine.txt"
+  refute_line "  notes/"
+}
+
 @test "start copies .gitignore files from the main checkout, not a source checkout that's another worktree" {
   scaffold_worktree
   OTHER="${TESTDIR}/site-other"
