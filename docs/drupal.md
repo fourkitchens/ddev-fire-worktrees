@@ -149,6 +149,14 @@ in `.ddev/fire-worktree-start.log`.
   Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Startup, refresh and
   `info` warn that a file `reads Git metadata, which a worktree's container doesn't have` when
   Drush's output shows the problem, and name the file and line when they can.
+* **Scaffold files in `git status`.** Drupal's Composer scaffold writes files such as
+  `web/README.md`, and `.gitignore` files that hide them, but it writes the `.gitignore` files only
+  when it can run Git, which it can't in a worktree's web container, for the reason above. So after
+  `ddev composer install`, startup copies each missing scaffold `.gitignore` from your main
+  checkout and prints `Copied <path> from the main checkout`. A worktree you haven't
+  edited then has a clean `git status`, and `ddev fire-worktree-remove` deletes it. To clean up a
+  worktree an earlier version left with untracked scaffold files, rerun `ddev fire-worktree-start`
+  in it.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
   worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead. Startup warns about
   `web_environment` values that name your main checkout's hostnames, such as
