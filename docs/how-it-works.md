@@ -8,11 +8,15 @@
    `config.local.yaml` applies from the first start.
 2. Writes `.ddev/config.worktree.local.yaml` with the worktree's DDEV project name and hostnames.
 3. Starts the project, seeding a new database from `--db`.
-4. Runs `ddev composer install` when the project has a `composer.json`.
+4. Runs `ddev composer install` when the project has a `composer.json`, then copies from your main
+   checkout each `.gitignore` the worktree lacks that hides one of its untracked files, such as the
+   Drupal scaffold's. See [Drupal notes](drupal.md#drupal-notes).
 5. If it just copied a database, runs `WORKTREE_BUILD_COMMAND`. `--no-build` skips this and prints
    the command. A copy that [looks incomplete](databases.md#when-the-database-is-copied) isn't
    built.
-6. Prints the worktree's URLs. For a Drupal site with a database, it also prints a one-time login
+6. Warns about untracked files that Composer or the build created and nothing hides, since
+   `remove` refuses a worktree that has them.
+7. Prints the worktree's URLs. For a Drupal site with a database, it also prints a one-time login
    link from `ddev drush uli`. If the build failed, it then prints the command to rerun and exits
    1, or 0 with `WORKTREE_BUILD_FAILURE=warn`.
 
@@ -32,6 +36,14 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
 * **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
   from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
+* **Scaffold `.gitignore` files.** For each untracked file in the worktree, startup asks your main
+  checkout's Git which file ignores it. It copies that file from the main checkout when it's a
+  `.gitignore` inside the project, the worktree has no file there, and the main checkout ignores it
+  too, and prints `Copied <path> from the main checkout`. It repeats until there's nothing more to
+  copy, so a `.gitignore` that another one hides is copied too. Unlike `WORKTREE_COPY_FILES`, these
+  always come from the main checkout, not the source checkout that `WORKTREE_COPY_FILES` comes
+  from, since a source checkout that is another worktree may lack them as well. Startup never overwrites a file or changes the main
+  checkout.
 * **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. A
   setting those files don't set comes from the checkout that ran `create`, else from
   `T3CODE_PROJECT_ROOT`.

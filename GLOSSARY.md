@@ -1,11 +1,19 @@
 # ddev-fire-worktrees
 
-Gives each Git worktree of a DDEV project its own DDEV project, hostnames and database, so several
-branches of one site can run side by side.
+A DDEV add-on that gives each Git worktree of a project its own DDEV project, database and
+hostnames, so several branches run side by side.
 
 ## Language
 
-**Primary checkout**:
-The repository's original, non-worktree checkout, whose `.git` directory every linked worktree
-shares. Its DDEV project is the primary project.
-_Avoid_: main checkout (easily confused with the `main` branch)
+**Main checkout**:
+The repository's original working tree, the one that holds the `.git` directory rather than a
+linked worktree.
+_Avoid_: primary checkout
+
+**Source checkout**:
+The checkout a worktree's startup copies local files and settings from: the checkout that ran
+`create`, else `T3CODE_PROJECT_ROOT`, else the main checkout.
+_Avoid_: creating checkout
+
+**Primary project**:
+The DDEV project of the main checkout.
