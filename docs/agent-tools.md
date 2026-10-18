@@ -57,15 +57,27 @@ For [T3](https://t3.codes), add these actions to the project's `t3.json`:
 {
   "$schema": "https://t3.codes/schema/t3.json",
   "scripts": [
-    { "name": "Start worktree", "command": "ddev fire-worktree-start", "icon": "play", "runOnWorktreeCreate": true, "async": false },
-    { "name": "Delete worktree environment", "command": "ddev fire-worktree-remove --keep-checkout", "icon": "configure" },
-    { "name": "Find orphaned worktree environments", "command": "ddev fire-worktree-prune", "icon": "configure" }
+    { "name": "Start worktree", "command": "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$T3CODE_PROJECT_ROOT/.ddev/commands/host/fire-worktree-start\"; fi", "icon": "play", "runOnWorktreeCreate": true, "async": false },
+    { "name": "Delete worktree environment", "command": "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout; else \"$T3CODE_PROJECT_ROOT/.ddev/commands/host/fire-worktree-remove\" --keep-checkout; fi", "icon": "configure" },
+    { "name": "Find orphaned worktree environments", "command": "if [ -x .ddev/commands/host/fire-worktree-prune ]; then ddev fire-worktree-prune; else \"$T3CODE_PROJECT_ROOT/.ddev/commands/host/fire-worktree-prune\"; fi", "icon": "configure" }
   ]
 }
 ```
 
-**Start worktree** runs when T3 creates a thread's worktree. Startup copies local files from the
-checkout T3 names in `T3CODE_PROJECT_ROOT`.
+**Start worktree** runs when T3 creates a thread's worktree. Startup copies local files, and any
+`WORKTREE_*` setting the worktree's own config lacks, from the checkout T3 names in
+`T3CODE_PROJECT_ROOT`. On a branch with an older version of the add-on, startup takes only the
+local files from it, not the settings. Leave `previewUrl` out of these actions: a fixed URL previews the primary project from
+every thread.
+
+That checkout needs the add-on. A thread can start from a branch that doesn't have it yet, such as
+an older release branch. So each action runs the worktree's own copy of the command if it has one,
+and that checkout's copy otherwise. In such a worktree, `ddev fire-worktree-info` and the other
+commands don't exist either; run that checkout's copy instead:
+
+```bash
+"$T3CODE_PROJECT_ROOT/.ddev/commands/host/fire-worktree-info" --json
+```
 
 T3 has no hook for deleting a worktree, so run **Delete worktree environment** before deleting a
 thread. If you forget, **Find orphaned worktree environments** lists what's left behind; delete it

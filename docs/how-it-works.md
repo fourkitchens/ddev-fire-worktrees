@@ -32,8 +32,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
 * **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
   from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
-* **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. When
-  `create` runs it, a setting those files don't set comes from the checkout that ran `create`.
+* **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. A
+  setting those files don't set comes from the checkout that ran `create`, else from
+  `T3CODE_PROJECT_ROOT`.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.

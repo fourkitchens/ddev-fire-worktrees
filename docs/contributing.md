@@ -10,6 +10,7 @@ brew tap bats-core/bats-core && brew install bats-support bats-assert bats-file
 shellcheck -x -s bash commands/host/* fire-worktrees/lib.sh
 bats ./tests/lib.bats                           # library tests, a few seconds, no Docker
 bats ./tests/create.bats                        # create's branch and pull request handling, no Docker
+bats ./tests/t3.bats                            # the T3 actions in docs/agent-tools.md, no Docker
 bats ./tests --filter-tags '!release'           # everything, with real DDEV projects
 ```
 

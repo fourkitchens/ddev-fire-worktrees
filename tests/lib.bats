@@ -91,6 +91,7 @@ EOF
   printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
   printf 'web_environment: [WORKTREE_BUILD_COMMAND=my-build]\n' >"${SITE}/.ddev/config.local.yaml"
 
+  unset T3CODE_PROJECT_ROOT
   WORKTREE_SOURCE_ROOT="${SOURCE}"
   run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
   assert_output "team"
@@ -108,6 +109,31 @@ EOF
   WORKTREE_SOURCE_ROOT="${TESTDIR}/missing"
   run fw::setting "${SITE}" WORKTREE_DB primary
   assert_success
+  assert_output "primary"
+}
+
+@test "settings a worktree's config files lack come from T3CODE_PROJECT_ROOT, unless create names a checkout" {
+  # The checkout T3 names, and one that ran create, each with its own prefix.
+  T3_ROOT="${TESTDIR}/t3-root"
+  SOURCE="${TESTDIR}/source"
+  mkdir -p "${T3_ROOT}/.ddev" "${SOURCE}/.ddev"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=t3\n  - WORKTREE_DB=fresh\n' >"${T3_ROOT}/.ddev/config.yaml"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=create\n' >"${SOURCE}/.ddev/config.yaml"
+  # A branch from before them.
+  printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
+
+  unset WORKTREE_SOURCE_ROOT
+  T3CODE_PROJECT_ROOT="${T3_ROOT}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "t3"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_output "fresh"
+
+  WORKTREE_SOURCE_ROOT="${SOURCE}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "create"
+  # Only one checkout fills in settings, so T3's WORKTREE_DB doesn't apply.
+  run fw::setting "${SITE}" WORKTREE_DB primary
   assert_output "primary"
 }
 

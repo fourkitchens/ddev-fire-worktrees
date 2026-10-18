@@ -196,10 +196,12 @@ fw::web_environment() {
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
 # (such as config.local.yaml) overrides an earlier one. When none of DIR's files
 # set NAME, such as on a branch that predates the setting, use the value from
-# WORKTREE_SOURCE_ROOT, the checkout that ran create. Empty means DEFAULT.
+# WORKTREE_SOURCE_ROOT, the checkout that ran create, else from T3's
+# T3CODE_PROJECT_ROOT. Empty means DEFAULT.
 fw::setting() {
   local dir item value=
-  for dir in "$1" ${WORKTREE_SOURCE_ROOT:+"$WORKTREE_SOURCE_ROOT"}; do
+  local source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-}}
+  for dir in "$1" ${source:+"$source"}; do
     [[ -f "$dir/.ddev/config.yaml" ]] || continue
     while IFS= read -r item; do
       if [[ "$item" == "$2="* && -n "${item#"$2="}" ]]; then
