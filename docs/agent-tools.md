@@ -87,3 +87,9 @@ with `ddev fire-worktree-prune --yes`.
 When a tool deletes a worktree's checkout itself, its DDEV project, database and service volumes
 stay behind. Run `ddev fire-worktree-prune` from any checkout to list them, and
 `ddev fire-worktree-prune --yes` to delete them.
+
+Startup tells you when they pile up. When a worktree starts and the registry lists environments
+whose checkout is gone, it prints one line saying how many and naming
+`ddev fire-worktree-prune --yes`, then carries on. It never deletes them itself, since a checkout
+on a drive that isn't mounted looks gone too. It counts only worktrees that `fire-worktree-start`
+recorded; `prune` also lists older ones it finds through Docker.
