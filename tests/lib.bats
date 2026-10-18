@@ -331,6 +331,25 @@ YAML
 extra\.zz-feature-x-[0-9]+$'
 }
 
+@test "start skips WORKTREE_COPY_FILES paths outside the project" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  printf '/.ddev/config.local.yaml\n/notes..txt\n' >"${SITE}/.gitignore"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+  printf 'web_environment:\n    - WORKTREE_COPY_FILES=.ddev/config.local.yaml ../outside.txt notes..txt\n' >"${SITE}/.ddev/config.local.yaml"
+  echo outside >"${TESTDIR}/outside.txt"
+  echo notes >"${SITE}/notes..txt"
+
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_line "Warning: Skipping ../outside.txt in WORKTREE_COPY_FILES; use a path inside the project."
+  # Two dots in a name are fine; only a .. directory leaves the project.
+  assert_line "Copied notes..txt"
+}
+
 @test "an existing worktree keeps the name an earlier version gave it" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site

@@ -784,6 +784,24 @@ fw::copy_list() {
   fw::setting "$FW_ROOT" WORKTREE_COPY_FILES ".ddev/config.local.yaml ${docroot:+$docroot/}sites/default/settings.local.php"
 }
 
+# fw::inside_project PATH: true when the relative PATH stays inside the project.
+fw::inside_project() {
+  case /$1/ in
+    //* | */../*) return 1 ;;
+  esac
+}
+
+# fw::copy_missing SOURCE PATH [NOTE]: copy the file PATH from SOURCE into
+# FW_ROOT and print "Copied PATH NOTE". Copies nothing, and fails, when PATH
+# leaves the project, SOURCE has no file there or FW_ROOT has anything there.
+fw::copy_missing() {
+  fw::inside_project "$2" || return 1
+  [[ -f "$1/$2" && ! -e "$FW_ROOT/$2" && ! -L "$FW_ROOT/$2" ]] || return 1
+  mkdir -p "$(dirname "$FW_ROOT/$2")"
+  cp "$1/$2" "$FW_ROOT/$2"
+  printf 'Copied %s%s\n' "$2" "${3:+ $3}"
+}
+
 # fw::copy_files SOURCE: copy gitignored local files that FW_ROOT lacks.
 fw::copy_files() {
   local rel seen=' ' more=true
@@ -797,16 +815,9 @@ fw::copy_files() {
     for rel in ${files[@]+"${files[@]}"}; do
       [[ "$seen" != *" $rel "* ]] || continue
       seen="$seen$rel "
-      case $rel in
-        /* | *..*)
-          fw::warn "Skipping $rel in WORKTREE_COPY_FILES; use a path inside the project."
-          continue
-          ;;
-      esac
-      if [[ -f "$1/$rel" && ! -e "$FW_ROOT/$rel" && ! -L "$FW_ROOT/$rel" ]]; then
-        mkdir -p "$(dirname "$FW_ROOT/$rel")"
-        cp "$1/$rel" "$FW_ROOT/$rel"
-        printf 'Copied %s\n' "$rel"
+      if ! fw::inside_project "$rel"; then
+        fw::warn "Skipping $rel in WORKTREE_COPY_FILES; use a path inside the project."
+      elif fw::copy_missing "$1" "$rel"; then
         more=true
       fi
     done
@@ -841,16 +852,13 @@ fw::copy_gitignores() {
   while [[ "$more" == true ]]; do
     more=false
     while IFS= read -r src; do
-      case /$src/ in
-        */../* | //*) continue ;;
-      esac
-      [[ "$(basename "$src")" == .gitignore && -f "$FW_PRIMARY_ROOT/$src" ]] || continue
-      [[ ! -e "$FW_ROOT/$src" && ! -L "$FW_ROOT/$src" ]] || continue
+      # Git can answer with a file outside the project, such as a global
+      # excludes file, which check-ignore can't take.
+      fw::inside_project "$src" && [[ "$(basename "$src")" == .gitignore ]] || continue
       git -C "$FW_PRIMARY_ROOT" check-ignore -q -- "$src" || continue
-      mkdir -p "$(dirname "$FW_ROOT/$src")"
-      cp "$FW_PRIMARY_ROOT/$src" "$FW_ROOT/$src"
-      printf 'Copied %s from the main checkout\n' "$src"
-      more=true
+      if fw::copy_missing "$FW_PRIMARY_ROOT" "$src" 'from the main checkout'; then
+        more=true
+      fi
     done < <(fw::ignoring_files)
   done
 }
