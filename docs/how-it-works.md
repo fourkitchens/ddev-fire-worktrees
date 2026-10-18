@@ -36,8 +36,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
 * **Hostnames.** Each `additional_hostnames` entry is rewritten for the worktree, and
   `additional_fqdns` and fixed host ports are left out. See
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).
-* **Local files.** Startup copies `WORKTREE_COPY_FILES` from the checkout that ran `create`, else
-  from `T3CODE_PROJECT_ROOT`, else from your main checkout. It never overwrites a file.
+* **Local files.** Startup copies `WORKTREE_COPY_FILES` from the source checkout: the checkout that
+  ran `create`, else your main checkout. It never overwrites a file.
 * **Scaffold `.gitignore` files.** For each untracked file in the worktree, startup asks your main
   checkout's Git which file ignores it. It copies that file from the main checkout when it's a
   `.gitignore` inside the project, the worktree has no file there, and the main checkout ignores it
@@ -47,8 +47,9 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   from, since a source checkout that is another worktree may lack them as well. Startup never overwrites a file or changes the main
   checkout.
 * **Settings.** Startup reads the `WORKTREE_*` settings from the worktree's own config files. A
-  setting those files don't set comes from the checkout that ran `create`, else from
-  `T3CODE_PROJECT_ROOT`.
+  setting those files don't set, such as on a branch older than the setting, comes from the source
+  checkout. When `create` ran from another worktree, the main checkout doesn't fill in what that
+  worktree lacks too.
 * **Log.** Each start appends its output to the worktree's `.ddev/fire-worktree-start.log`, under a
   line with the date, and prints the log's path when it fails. Startup adds the log to
   `.git/info/exclude`, and `remove` deletes it with the checkout.

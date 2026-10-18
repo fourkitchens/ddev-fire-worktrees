@@ -228,10 +228,10 @@ fw::web_environment() {
 
 # fw::source_checkout: the checkout a worktree takes the local files and
 # settings it lacks from: WORKTREE_SOURCE_ROOT, the checkout that ran create,
-# else T3's T3CODE_PROJECT_ROOT, else the main checkout. Empty in a bare
-# repository.
+# else the main checkout. Empty in a bare repository. WORKTREE_SOURCE_ROOT is
+# create's own, not an input for anything else to set.
 fw::source_checkout() {
-  printf '%s' "${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-${FW_PRIMARY_ROOT:-}}}"
+  printf '%s' "${WORKTREE_SOURCE_ROOT:-${FW_PRIMARY_ROOT:-}}"
 }
 
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
