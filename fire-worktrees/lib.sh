@@ -813,6 +813,66 @@ fw::copy_files() {
   done
 }
 
+# fw::ignoring_files: for each untracked file in FW_ROOT, the file in the main
+# checkout whose pattern ignores that path there, one per line. Git answers
+# from patterns, so the path needn't exist in the main checkout.
+fw::ignoring_files() {
+  local src pattern
+  # Each answer is the source, line number, pattern and path.
+  git -C "$FW_ROOT" ls-files -z --others --exclude-standard |
+    { git -C "$FW_PRIMARY_ROOT" check-ignore -z -v --no-index --stdin || true; } |
+    while IFS= read -r -d '' src && IFS= read -r -d '' _ && IFS= read -r -d '' pattern && IFS= read -r -d '' _; do
+      # A pattern starting with ! matches a path it doesn't ignore.
+      [[ "$pattern" != '!'* ]] || continue
+      printf '%s\n' "$src"
+    done | sort -u
+}
+
+# fw::copy_gitignores: copy from the main checkout each .gitignore that would
+# hide an untracked file in FW_ROOT, when FW_ROOT lacks it. Composer's Drupal
+# scaffold writes those .gitignore files only where Git works, which it doesn't
+# in a worktree's web container. Copies only .gitignore files inside the
+# project that the main checkout ignores itself, so a copy is never untracked.
+fw::copy_gitignores() {
+  local src more=true
+  [[ -n "$FW_PRIMARY_ROOT" && "$FW_ROOT" != "$FW_PRIMARY_ROOT" ]] || return 0
+  # A copied .gitignore can be untracked until the one that ignores it is
+  # copied too.
+  while [[ "$more" == true ]]; do
+    more=false
+    while IFS= read -r src; do
+      case /$src/ in
+        */../* | //*) continue ;;
+      esac
+      [[ "$(basename "$src")" == .gitignore && -f "$FW_PRIMARY_ROOT/$src" ]] || continue
+      [[ ! -e "$FW_ROOT/$src" && ! -L "$FW_ROOT/$src" ]] || continue
+      git -C "$FW_PRIMARY_ROOT" check-ignore -q -- "$src" || continue
+      mkdir -p "$(dirname "$FW_ROOT/$src")"
+      cp "$FW_PRIMARY_ROOT/$src" "$FW_ROOT/$src"
+      printf 'Copied %s from the main checkout\n' "$src"
+      more=true
+    done < <(fw::ignoring_files)
+  done
+}
+
+# fw::untracked: FW_ROOT's untracked files, as git status lists them.
+fw::untracked() {
+  git -C "$FW_ROOT" ls-files --others --exclude-standard --directory --no-empty-directory
+}
+
+# fw::warn_untracked BEFORE: warn about FW_ROOT's untracked files that aren't in
+# BEFORE, an earlier fw::untracked.
+fw::warn_untracked() {
+  local new
+  new=$(fw::untracked | FW_BEFORE=$1 awk '
+    BEGIN { n = split(ENVIRON["FW_BEFORE"], old, "\n"); for (i = 1; i <= n; i++) seen[old[i]] = 1 }
+    !seen[$0] { print "  " $0 }')
+  [[ -n "$new" ]] || return 0
+  fw::warn "Startup created untracked files that nothing ignores:
+$new
+fire-worktree-remove refuses to delete this worktree until they're gone. If every checkout gets them, list them in the project's .gitignore."
+}
+
 # fw::write_config PRIMARY: write FW_ROOT's generated DDEV config for FW_NAME.
 fw::write_config() {
   local cfg="$FW_ROOT/.ddev/$FW_CONFIG_NAME" hosts key fqdns
@@ -973,7 +1033,7 @@ fw::start_worktree() {
 
 # fw::start_steps DB BUILD: fw::start_worktree's work, in FW_ROOT.
 fw::start_steps() {
-  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' item nested=false composer_root new_db=false empty=false on_failure build_failed=false
+  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' item nested=false composer_root untracked new_db=false empty=false on_failure build_failed=false
   cfg=".ddev/$FW_CONFIG_NAME"
   legacy=.ddev/config.worktree.yaml
   if [[ (-e "$cfg" || -L "$cfg") ]] && ! fw::is_generated "$cfg"; then
@@ -1070,9 +1130,13 @@ fw::start_steps() {
   fw::unlock
   fw::import_dump "$dump"
 
+  # Note the untracked files so far, to tell which ones Composer and the build
+  # create.
+  untracked=$(fw::untracked)
   composer_root=$(fw::config_scalar "$FW_ROOT" composer_root)
   if [[ -f "${composer_root:-.}/composer.json" ]]; then
     ddev composer install || fw::die 'ddev composer install failed.'
+    fw::copy_gitignores
   fi
 
   if [[ -n "$seed" || -n "$dump" ]]; then
@@ -1086,6 +1150,7 @@ fw::start_steps() {
   elif [[ "$(fw::db_source)" != fresh$'\t'* && "$(fw::db_table_count)" == 0 ]]; then
     fw::warn "This worktree's database has no tables. To copy one in, run: ddev fire-worktree-refresh"
   fi
+  fw::warn_untracked "$untracked"
   fw::show_worktree "$empty"
   if [[ "$build_failed" == true ]]; then
     fw::build_failed "$on_failure"
