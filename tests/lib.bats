@@ -362,7 +362,7 @@ extra\.zz-feature-x-[0-9]+$'
   mkdir -p "${T3_ROOT}/.ddev" "${T3_ROOT}/web/sites/default" "${SITE}/web/sites/default"
   printf 'xdebug_enabled: true\n' >"${T3_ROOT}/.ddev/config.local.yaml"
   echo '<?php // from T3' >"${T3_ROOT}/web/sites/default/settings.local.php"
-  echo '<?php // from the primary' >"${SITE}/web/sites/default/settings.local.php"
+  echo '<?php // from the main checkout' >"${SITE}/web/sites/default/settings.local.php"
 
   # Start without Docker or DDEV.
   ddev() { :; }

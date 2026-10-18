@@ -83,8 +83,8 @@ fi
 # Startup runs in the new worktree, so resolve a file path from here first.
 db=$(fw::db_arg "$db")
 
-# The calling checkout, primary or not, is the source of copied local files and
-# of any setting a branch's own config lacks, here and in startup.
+# The calling checkout, main checkout or not, is the source of copied local
+# files and of any setting a branch's own config lacks, here and in startup.
 fw::context "$PWD"
 export WORKTREE_SOURCE_ROOT=$FW_ROOT
 [[ -n "$FW_PRIMARY_ROOT" ]] || fw::die 'fire-worktree-create needs a main checkout; bare repositories are not supported.'
