@@ -32,7 +32,7 @@ esac
 # primary project when this worktree is nested inside it.
 fw::context "$PWD"
 if [[ "$FW_IS_PRIMARY" == true ]]; then
-  fw::die "$FW_ROOT is the primary checkout. Run fire-worktree-info in a linked worktree, or use ddev describe."
+  fw::die "$FW_ROOT is the main checkout. Run fire-worktree-info in a linked worktree, or use ddev describe."
 fi
 cd "$FW_ROOT"
 if ! fw::is_generated ".ddev/$FW_CONFIG_NAME"; then

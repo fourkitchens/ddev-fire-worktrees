@@ -45,7 +45,7 @@ if [[ -n "$caller_common" && "$caller_common" != "$FW_COMMON_DIR" ]]; then
   fw::die "$FW_ROOT belongs to a different repository."
 fi
 if [[ "$FW_IS_PRIMARY" == true ]]; then
-  fw::die "$FW_ROOT is the primary checkout. Run fire-worktree-remove on a linked worktree."
+  fw::die "$FW_ROOT is the main checkout. Run fire-worktree-remove on a linked worktree."
 fi
 
 # Delete only a project that worktree startup configured. Without that file the

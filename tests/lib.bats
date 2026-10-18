@@ -214,7 +214,7 @@ EOF
   assert_output "ddev site-build"
 }
 
-@test "names the primary project from the primary checkout" {
+@test "names the primary project from the main checkout" {
   # Without name:, DDEV names each checkout after its directory.
   printf 'type: drupal11\n' >"${SITE}/.ddev/config.yaml"
   git_site
@@ -239,7 +239,7 @@ EOF
   assert_failure
 }
 
-# snapshot_dirs: a primary checkout with a db_snapshots directory, and a
+# snapshot_dirs: a main checkout with a db_snapshots directory, and a
 # worktree on the same database server.
 snapshot_dirs() {
   FW_PRIMARY_ROOT="${SITE}"
@@ -336,7 +336,7 @@ YAML
   printf '/.ddev/config.local.yaml\n/notes.txt\n' >"${SITE}/.gitignore"
   git_site
   git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
-  # A developer's own settings, which only the primary checkout has so far.
+  # A developer's own settings, which only the main checkout has so far.
   cat >"${SITE}/.ddev/config.local.yaml" <<'YAML'
 web_environment:
     - WORKTREE_NAME_PREFIX=zz
@@ -412,18 +412,18 @@ extra\.zz-feature-x-[0-9]+$'
   assert_equal "$(fw::generated_name "${WT}")" mysite-feature-add-retry-logic-2792006950
 }
 
-@test "copies local files from T3CODE_PROJECT_ROOT rather than the primary" {
+@test "copies local files from T3CODE_PROJECT_ROOT rather than the main checkout" {
   printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
   printf '/.ddev/config.local.yaml\n/web/sites/default/settings.local.php\n' >"${SITE}/.gitignore"
   git_site
   git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
   # The checkout T3 names has both files on the default WORKTREE_COPY_FILES
-  # list. The primary has only an older settings.local.php.
+  # list. The main checkout has only an older settings.local.php.
   T3_ROOT="${TESTDIR}/t3-root"
   mkdir -p "${T3_ROOT}/.ddev" "${T3_ROOT}/web/sites/default" "${SITE}/web/sites/default"
   printf 'xdebug_enabled: true\n' >"${T3_ROOT}/.ddev/config.local.yaml"
   echo '<?php // from T3' >"${T3_ROOT}/web/sites/default/settings.local.php"
-  echo '<?php // from the primary' >"${SITE}/web/sites/default/settings.local.php"
+  echo '<?php // from the main checkout' >"${SITE}/web/sites/default/settings.local.php"
 
   # Start without Docker or DDEV.
   ddev() { :; }
@@ -438,7 +438,7 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output '<?php // from T3'
 }
 
-@test "prune lists unregistered projects with the primary checkout's prefix from any checkout" {
+@test "prune lists unregistered projects with the main checkout's prefix from any checkout" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site
   # A branch from before the project set its prefix.
@@ -613,16 +613,16 @@ YAML
   export -f ddev docker
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   cd "${WT}"
-  # The primary checkout has no snapshot for --db=latest to reuse.
+  # The main checkout has no snapshot for --db=latest to reuse.
   run "${DIR}/commands/host/fire-worktree-start" --db=latest
   assert_failure
-  assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
+  assert_line "The main checkout has no database snapshot to copy. Start its project, or use --db=fresh."
   refute_output --partial "Worktree URLs"
   assert_line "Startup log: ${WT}/.ddev/${FW_LOG_NAME}"
   assert [ ! -e "${FW_LOCK}" ]
   run cat "${WT}/.ddev/${FW_LOG_NAME}"
   assert_line "Configured DDEV project $(fw::yaml_scalar "${WT}/.ddev/${FW_CONFIG_NAME}" name)"
-  assert_line "The primary checkout has no database snapshot to copy. Start its project, or use --db=fresh."
+  assert_line "The main checkout has no database snapshot to copy. Start its project, or use --db=fresh."
 }
 
 @test "finds web_environment URLs that point a worktree at the primary site" {
@@ -852,7 +852,7 @@ drupal_worktree() {
   cd "${SITE}"
   run "${INFO}"
   assert_failure
-  assert_output --partial "is the primary checkout"
+  assert_output --partial "is the main checkout"
   git -C "${SITE}" worktree add -q -b feature/y "${TESTDIR}/site-feature-y"
   cd "${TESTDIR}/site-feature-y"
   run "${INFO}"
@@ -985,11 +985,11 @@ with_database() {
   refute_output --partial "To populate"
 }
 
-@test "refresh refuses the primary checkout, a worktree without its own database, and a run without --yes" {
+@test "refresh refuses the main checkout, a worktree without its own database, and a run without --yes" {
   drupal_worktree
   run fw::refresh_worktree "${SITE}" "" true true
   assert_failure
-  assert_output --partial "not the primary checkout"
+  assert_output --partial "not the main checkout"
 
   # Before its first start, DDEV gives the worktree the primary project's name.
   run fw::refresh_worktree "${WT}" "" true true
@@ -1128,7 +1128,7 @@ with_database() {
   started_worktree
   run fw::refresh_worktree "${WT}" latest true true
   assert_failure
-  assert_output --partial "The primary checkout has no database snapshot to copy."
+  assert_output --partial "The main checkout has no database snapshot to copy."
   run cat "${DDEV_LOG}"
   assert_output ""
   [ ! -e "${FW_LOCK}" ]
