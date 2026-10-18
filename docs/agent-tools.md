@@ -16,7 +16,7 @@ spaces.
 ### The setup line
 
 ```sh
-if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
+if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
 ```
 
 It runs the worktree's own `fire-worktree-start` when its branch has the add-on, so a branch that
@@ -32,7 +32,7 @@ can start several at once.
 ### The teardown line
 
 ```sh
-if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
+if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
 ```
 
 It deletes the worktree's DDEV project, database and service volumes, and leaves the checkout for the
@@ -60,7 +60,7 @@ In a worktree whose branch doesn't have the add-on, `ddev fire-worktree-info` an
 commands don't exist. Run your main checkout's copy instead, as the setup and teardown lines do:
 
 ```bash
-"$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-info" --json
+"$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-info" --json
 ```
 
 ### Login links and worktree details
@@ -118,9 +118,9 @@ For [T3](https://t3.codes), add these actions to the project's `t3.json`:
 {
   "$schema": "https://t3.codes/schema/t3.json",
   "scripts": [
-    { "name": "Start worktree", "command": "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi", "icon": "play", "runOnWorktreeCreate": true, "async": false },
-    { "name": "Delete worktree environment", "command": "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout; fi", "icon": "configure" },
-    { "name": "Find orphaned worktree environments", "command": "if [ -x .ddev/commands/host/fire-worktree-prune ]; then ddev fire-worktree-prune; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-prune\"; fi", "icon": "configure" }
+    { "name": "Start worktree", "command": "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi", "icon": "play", "runOnWorktreeCreate": true, "async": false },
+    { "name": "Delete worktree environment", "command": "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout; fi", "icon": "configure" },
+    { "name": "Find orphaned worktree environments", "command": "if [ -x .ddev/commands/host/fire-worktree-prune ]; then ddev fire-worktree-prune; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-prune\"; fi", "icon": "configure" }
   ]
 }
 ```
@@ -146,9 +146,9 @@ For [Orca](https://www.onorca.dev), add this to the project's `orca.yaml`:
 ```yaml
 scripts:
   setup: |
-    if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
+    if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
   archive: |
-    if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
+    if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
 setupAgentStartupPolicy: wait-for-setup
 ```
 
@@ -169,8 +169,8 @@ For [Conductor](https://www.conductor.build), add this to the project's `.conduc
 
 ```toml
 [scripts]
-setup = 'if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi'
-archive = 'if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true'
+setup = 'if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi'
+archive = 'if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true'
 ```
 
 The single quotes make each line a TOML literal string, which holds its double quotes without
@@ -189,7 +189,7 @@ For [Cursor](https://cursor.com), add this to the project's `.cursor/worktrees.j
 ```json
 {
   "setup-worktree": [
-    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
   ]
 }
 ```
@@ -211,10 +211,10 @@ For [Superset](https://superset.sh), add this to the project's `.superset/config
 ```json
 {
   "setup": [
-    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
   ],
   "teardown": [
-    "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout --yes; fi || true"
+    "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else \"$(dirname \"$(git rev-parse --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout --yes; fi || true"
   ]
 }
 ```

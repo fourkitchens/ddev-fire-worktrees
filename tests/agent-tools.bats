@@ -88,13 +88,20 @@ old_worktree() {
   git -C "${SITE}" worktree add -q "${WT}" release/old
 }
 
+# by_section: each line of the page under a "## " heading, after that section's
+# title and a tab. Headings are left out, and a "## " line in a code block isn't
+# one.
+by_section() {
+  awk '
+    /^```/ { fence = !fence }
+    !fence && /^## / { title = substr($0, 4); next }
+    title != "" { print title "\t" $0 }
+  ' "${PAGE}"
+}
+
 # section TITLE: the page's "## TITLE" section, without its heading.
 section() {
-  awk -v heading="## $1" '
-    /^```/ { fence = !fence }
-    !fence && /^## / { inside = ($0 == heading); next }
-    inside
-  ' "${PAGE}"
+  by_section | awk -F '\t' -v title="$1" '$1 == title' | cut -f 2-
 }
 
 # shared_line setup|teardown: the line the "Any agent tool" section publishes,
@@ -108,13 +115,21 @@ shared_line() {
   '
 }
 
+# command_line COMMAND [ARGS]: the setup line, running COMMAND with ARGS where
+# it runs fire-worktree-start.
+command_line() {
+  local line args=${2:+ $2}
+  line=$(shared_line setup)
+  line=${line//fire-worktree-start/$1}
+  line=${line/"ddev $1;"/"ddev $1$args;"}
+  line=${line/"$1\";"/"$1\"$args;"}
+  printf '%s\n' "${line}"
+}
+
 # tool_sections: the title of each tool's section, one per line: every "##"
 # section but "Any agent tool".
 tool_sections() {
-  awk '
-    /^```/ { fence = !fence }
-    !fence && /^## / { title = substr($0, 4); if (title != "Any agent tool") print title }
-  ' "${PAGE}"
+  by_section | awk -F '\t' '$1 != seen { seen = $1; if ($1 != "Any agent tool") print $1 }'
 }
 
 # Tool sections whose tool runs nothing before deleting a worktree, so their
@@ -316,4 +331,15 @@ project_of() {
       assert_output "${teardown_line}"
     fi
   done <<<"${tools}"
+}
+
+@test "T3's manual actions find the main checkout's copy as the setup line does" {
+  # T3 runs them in a terminal, so they ask before deleting and show a failure,
+  # unlike the teardown line.
+  run t3_action 'Delete worktree environment'
+  assert_success
+  assert_output "$(command_line fire-worktree-remove --keep-checkout)"
+  run t3_action 'Find orphaned worktree environments'
+  assert_success
+  assert_output "$(command_line fire-worktree-prune)"
 }

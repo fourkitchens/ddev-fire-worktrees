@@ -64,14 +64,17 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   them. `ddev version` shows the directory as `global-ddev-dir`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
-  Prune deletes only recorded projects whose checkout is gone. Without the checkout, `ddev delete`
-  can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
-  Compose labelled with the project. It lists, but never deletes, older worktree projects and
-  leftover volumes that match the prefix of the checkout you run it in or of your main checkout,
-  since another clone may own them. Startup counts recorded worktrees whose checkout is gone and
-  prints a one-line notice naming `ddev fire-worktree-prune --yes`. It reads only the registry and
-  the filesystem, makes no Docker calls, and changes nothing, since a checkout on a drive that
-  isn't mounted looks gone too.
+  Prune deletes only recorded projects whose checkout is gone: no checkout that Git lists for the
+  repository has the project's name in its generated config, so a worktree moved with
+  `git worktree move` keeps its environment. Without the checkout, `ddev delete` can't find add-on
+  services' volumes, such as Solr's, so prune also deletes every volume Docker Compose labelled
+  with the project. It lists, but never deletes, older worktree projects and leftover volumes that
+  match the prefix of the checkout you run it in, of your main checkout, or the default prefix, the
+  main checkout's project name, which earlier versions gave a worktree on a branch older than the
+  team's prefix. Another clone may own them. Startup counts recorded projects whose checkout is
+  gone the same way and prints a one-line notice naming `ddev fire-worktree-prune --yes`. It reads
+  only the registry, Git and the filesystem, makes no Docker calls, and changes nothing, since a
+  checkout on a drive that isn't mounted looks gone too.
 * **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
   worktree before its first start, when DDEV would treat it as your main project, to overwrite a
   file at a generated file's path that they didn't write, or to remove a checkout with uncommitted
