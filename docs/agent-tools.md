@@ -162,3 +162,22 @@ as its archive script too.
 
 Orca takes the archive script from the main checkout's `orca.yaml`, runs it with no terminal, and
 stops it after 2 minutes. `orca worktree rm` runs it only with `--run-hooks`.
+
+## Conductor
+
+For [Conductor](https://www.conductor.build), add this to the project's `.conductor/settings.toml`:
+
+```toml
+[scripts]
+setup = 'if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi'
+archive = 'if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true'
+```
+
+The single quotes make each line a TOML literal string, which holds its double quotes without
+escaping.
+
+Conductor's Mac app reads this file from the default branch on the remote, so merge it before you
+expect new workspaces to use it.
+
+Conductor starts the agent alongside setup and documents no setting to make it wait, so the
+agent's first steps may come before the site is running.

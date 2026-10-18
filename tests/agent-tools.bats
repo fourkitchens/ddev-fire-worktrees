@@ -129,6 +129,8 @@ tool_line() {
     T3:setup) t3_action 'Start worktree' ;;
     Orca:setup) section Orca | yaml_block setup | unquote yaml-block ;;
     Orca:teardown) section Orca | yaml_block archive | unquote yaml-block ;;
+    Conductor:setup) section Conductor | toml_key setup | unquote toml-literal ;;
+    Conductor:teardown) section Conductor | toml_key archive | unquote toml-literal ;;
     *)
       echo "tool_line has no case for the ${2} line in the ${1} section" >&2
       return 1
@@ -156,6 +158,12 @@ yaml_block() {
   '
 }
 
+# toml_key KEY: the single-quoted string value of each "KEY = " line on stdin,
+# quotes included.
+toml_key() {
+  sed -nE "s/^$1 = ('.*')\$/\1/p"
+}
+
 # unquote FORMAT: undo FORMAT's quoting of the string literal on stdin.
 unquote() {
   case $1 in
@@ -164,6 +172,8 @@ unquote() {
     json) sed -E 's/^"(.*)"$/\1/; s/\\(.)/\1/g' ;;
     # A block scalar's only quoting is its indentation.
     yaml-block) sed -E 's/^ +//' ;;
+    # A literal string has no escapes.
+    toml-literal) sed -E "s/^'(.*)'\$/\1/" ;;
     *)
       echo "unquote knows no format ${1}" >&2
       return 1
