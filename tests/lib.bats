@@ -526,6 +526,108 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output 1
 }
 
+# git_worktree: a PHP site in Git with a linked worktree WT on feature/x, and
+# ddev and docker stubbed out.
+git_worktree() {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+}
+
+@test "start mounts the shared Git directory read-only in the web container" {
+  git_worktree
+  # Git names the worktree's metadata after the directory it was added in.
+  git -C "${SITE}" worktree move "${WT}" "${TESTDIR}/renamed"
+  WT="${TESTDIR}/renamed"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  run cat "${WT}/.ddev/docker-compose.fire-worktree-git.yaml"
+  assert_output "$(
+    cat <<YAML
+${FW_MARKER}
+services:
+  web:
+    volumes:
+      - type: bind
+        source: "${SITE}/.git"
+        target: /mnt/fire-worktrees/git
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "\${DDEV_APPROOT}/.ddev/fire-worktree-git"
+        target: /var/www/html/.git
+        read_only: true
+        bind:
+          create_host_path: false
+YAML
+  )"
+  run cat "${WT}/.ddev/fire-worktree-git"
+  assert_output "gitdir: /mnt/fire-worktrees/git/worktrees/site-feature-x"
+  run git -C "${WT}" status --porcelain
+  assert_output ""
+  run grep -cxF -e /.ddev/docker-compose.fire-worktree-git.yaml -e /.ddev/fire-worktree-git "${SITE}/.git/info/exclude"
+  assert_output 2
+}
+
+@test "start refuses to overwrite a Git mount file it didn't write" {
+  git_worktree
+  printf 'services:\n  web: {}\n' >"${WT}/.ddev/docker-compose.fire-worktree-git.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "Refusing to overwrite .ddev/docker-compose.fire-worktree-git.yaml; this add-on didn't write it."
+  assert_equal "$(cat "${WT}/.ddev/docker-compose.fire-worktree-git.yaml")" "$(printf 'services:\n  web: {}')"
+  assert [ ! -e "${WT}/.ddev/fire-worktree-git" ]
+
+  rm "${WT}/.ddev/docker-compose.fire-worktree-git.yaml"
+  echo 'gitdir: /somewhere/else' >"${WT}/.ddev/fire-worktree-git"
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "Refusing to overwrite .ddev/fire-worktree-git; this add-on didn't write it."
+  assert_equal "$(cat "${WT}/.ddev/fire-worktree-git")" 'gitdir: /somewhere/else'
+  assert [ ! -e "${WT}/.ddev/docker-compose.fire-worktree-git.yaml" ]
+}
+
+@test "start keeps the mounted .git file's inode, and leaves it alone when unchanged" {
+  git_worktree
+  GITFILE="${WT}/.ddev/fire-worktree-git"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  local inode
+  inode=$(ls -i "${GITFILE}" | awk '{print $1}')
+
+  # A running container's single-file mount still shows the old inode, so a
+  # rerun leaves an unchanged file alone...
+  touch -t 200001010000 "${GITFILE}"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  run find "${GITFILE}" -mtime +1000
+  assert_output "${GITFILE}"
+
+  # ...and rewrites a changed one in place.
+  echo 'gitdir: /mnt/fire-worktrees/git/worktrees/old' >"${GITFILE}"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_equal "$(cat "${GITFILE}")" 'gitdir: /mnt/fire-worktrees/git/worktrees/site-feature-x'
+  assert_equal "$(ls -i "${GITFILE}" | awk '{print $1}')" "${inode}"
+}
+
+@test "a rerun after the main checkout moves mounts the shared Git directory from its new path" {
+  git_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  mv "${SITE}" "${TESTDIR}/moved"
+  git -C "${TESTDIR}/moved" worktree repair "${WT}"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  run grep -F 'source: ' "${WT}/.ddev/docker-compose.fire-worktree-git.yaml"
+  assert_line --index 0 "        source: \"${TESTDIR}/moved/.git\""
+}
+
 @test "reads WORKTREE_BUILD_FAILURE" {
   printf 'type: php
 ' >"${SITE}/.ddev/config.yaml"

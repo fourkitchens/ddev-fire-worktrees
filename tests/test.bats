@@ -130,6 +130,14 @@ worktree_name() {
   assert_output ""
   health_checks
 
+  # Git reads the shared Git directory in the container, which can't write to it.
+  run ddev exec git rev-parse --abbrev-ref HEAD
+  assert_success
+  assert_output "feature/one"
+  run ddev exec git -c user.name=Test -c user.email=test@example.com commit --allow-empty -qm 'In the container'
+  assert_failure
+  assert_output --partial "Read-only file system"
+
   # A rerun through the old command name keeps the database and doesn't rebuild.
   ddev mysql -e "INSERT INTO marker VALUES ('worktree-only')"
   rm web/built.txt
