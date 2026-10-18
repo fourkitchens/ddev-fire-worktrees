@@ -89,6 +89,7 @@ same options. See [Choosing the database](docs/databases.md).
 | [How it works](docs/how-it-works.md) | See what startup does and how names, hostnames, locks and prune work. |
 | [Troubleshooting](docs/troubleshooting.md) | Fix common errors and warnings. |
 | [Contributing](docs/contributing.md) | Run the tests, try changes in a project, and release. |
+| [Workflow](docs/workflow.md) | Take an idea or a bug report to a merged pull request with the agent skills. |
 
 ## Removal
 
