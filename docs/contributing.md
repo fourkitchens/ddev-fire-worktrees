@@ -10,11 +10,20 @@ brew tap bats-core/bats-core && brew install bats-support bats-assert bats-file
 shellcheck -x -s bash commands/host/* fire-worktrees/lib.sh
 bats ./tests/lib.bats                           # library tests, a few seconds, no Docker
 bats ./tests/create.bats                        # create's branch and pull request handling, no Docker
-bats ./tests/t3.bats                            # the T3 actions in docs/agent-tools.md, no Docker
+bats ./tests/agent-tools.bats                   # the lines in docs/agent-tools.md, no Docker
 bats ./tests --filter-tags '!release'           # everything, with real DDEV projects
 ```
 
 The tests need bats 1.5.0 or later.
+
+## Adding an agent tool
+
+Add a section for an agent tool to [Agent tools](agent-tools.md) only when the tool has a documented
+setup file that's committed to the repository, so a team can share the recipe. The section puts the
+setup line, and the teardown line where the tool runs a script before deleting a worktree, into that
+file unchanged. Give `tool_line` in `tests/agent-tools.bats` a case for each line, so the test
+checks the section's copy against the "Any agent tool" section; list a tool without teardown in
+`NO_TEARDOWN`.
 
 The DDEV tests start real projects, including a Drupal 11 site and a Postgres project, under
 `~/tmp`, and delete them afterwards. They take about seven minutes on a laptop.

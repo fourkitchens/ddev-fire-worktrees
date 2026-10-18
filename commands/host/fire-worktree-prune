@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #ddev-generated
 
-## Description: Delete DDEV projects whose worktree checkout is gone, such as after T3 deletes a thread
+## Description: Delete DDEV projects whose worktree checkout is gone, such as after an agent tool deletes a worktree
 ## Usage: fire-worktree-prune [--yes]
 ## Example: ddev fire-worktree-prune\nddev fire-worktree-prune --yes
 ## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Delete what the dry run lists"}]

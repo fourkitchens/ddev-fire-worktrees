@@ -263,7 +263,7 @@ EOF
   run bash -c "cd '${WT}' && ddev mysql -N -e 'SHOW TABLES'"
   assert_output ""
 
-  # Remove the checkout without the add-on, as T3 does when it deletes a thread.
+  # Remove the checkout without the add-on, as an agent tool does when it deletes a worktree.
   git worktree remove --force "${WT}"
   run ddev fire-worktree-prune
   assert_success

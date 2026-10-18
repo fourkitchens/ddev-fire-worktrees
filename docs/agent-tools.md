@@ -8,8 +8,10 @@ so the sections below differ only in where the lines go.
 ## Any agent tool
 
 A tool needs a setup script that runs in the new worktree, and ideally a script that runs before it
-deletes a worktree. Paste the lines below into those scripts unchanged. They run in `sh`, `bash` and
-`zsh`, under `set -e` and joined with `&&`, and work from checkouts whose paths have spaces.
+deletes a worktree. Paste the lines below into those scripts unchanged; they stay the same from
+release to release ([why](adr/0001-agent-tools-share-one-git-based-recipe.md)). They run in `sh`,
+`bash` and `zsh`, under `set -e` and joined with `&&`, and work from checkouts whose paths have
+spaces.
 
 ### The setup line
 
@@ -41,8 +43,8 @@ worktree. Its output still shows, and [`prune`](#tools-without-teardown) cleans 
 ### Tools without teardown
 
 When a tool can't run anything before it deletes a worktree, run
-`ddev fire-worktree-remove --keep-checkout` in the worktree before you delete it there. When a
-tool deletes a worktree's checkout on its own, its DDEV project, database and service volumes stay
+`ddev fire-worktree-remove --keep-checkout` in the worktree, then delete the worktree in the tool.
+When a worktree's checkout goes without that, its DDEV project, database and service volumes stay
 behind. Run `ddev fire-worktree-prune` from any checkout to list them, and
 `ddev fire-worktree-prune --yes` to delete them.
 

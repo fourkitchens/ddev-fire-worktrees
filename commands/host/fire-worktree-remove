@@ -5,7 +5,7 @@
 ## Usage: fire-worktree-remove [--yes] [--keep-checkout] [path]
 ## Example: ddev fire-worktree-remove\nddev fire-worktree-remove ../mysite-abc-123-short-description\nddev fire-worktree-remove --keep-checkout
 ## Aliases: worktree-remove
-## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Skip the confirmation prompt"},{"Name":"keep-checkout","Usage":"Delete only the DDEV project, for example before T3 deletes the checkout"}]
+## Flags: [{"Name":"yes","Shorthand":"y","Usage":"Skip the confirmation prompt"},{"Name":"keep-checkout","Usage":"Delete only the DDEV project, for example before an agent tool deletes the checkout"}]
 
 set -euo pipefail
 
