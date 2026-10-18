@@ -91,6 +91,7 @@ EOF
   printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
   printf 'web_environment: [WORKTREE_BUILD_COMMAND=my-build]\n' >"${SITE}/.ddev/config.local.yaml"
 
+  unset T3CODE_PROJECT_ROOT
   WORKTREE_SOURCE_ROOT="${SOURCE}"
   run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
   assert_output "team"
@@ -108,6 +109,31 @@ EOF
   WORKTREE_SOURCE_ROOT="${TESTDIR}/missing"
   run fw::setting "${SITE}" WORKTREE_DB primary
   assert_success
+  assert_output "primary"
+}
+
+@test "settings a worktree's config files lack come from T3CODE_PROJECT_ROOT, unless create names a checkout" {
+  # The checkout T3 names, and one that ran create, each with its own prefix.
+  T3_ROOT="${TESTDIR}/t3-root"
+  SOURCE="${TESTDIR}/source"
+  mkdir -p "${T3_ROOT}/.ddev" "${SOURCE}/.ddev"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=t3\n  - WORKTREE_DB=fresh\n' >"${T3_ROOT}/.ddev/config.yaml"
+  printf 'name: mysite\ntype: drupal11\nweb_environment:\n  - WORKTREE_NAME_PREFIX=create\n' >"${SOURCE}/.ddev/config.yaml"
+  # A branch from before them.
+  printf 'name: mysite\ntype: drupal11\nweb_environment: []\n' >"${SITE}/.ddev/config.yaml"
+
+  unset WORKTREE_SOURCE_ROOT
+  T3CODE_PROJECT_ROOT="${T3_ROOT}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "t3"
+  run fw::setting "${SITE}" WORKTREE_DB primary
+  assert_output "fresh"
+
+  WORKTREE_SOURCE_ROOT="${SOURCE}"
+  run fw::setting "${SITE}" WORKTREE_NAME_PREFIX default
+  assert_output "create"
+  # Only one checkout fills in settings, so T3's WORKTREE_DB doesn't apply.
+  run fw::setting "${SITE}" WORKTREE_DB primary
   assert_output "primary"
 }
 
@@ -331,6 +357,25 @@ YAML
   run fw::yaml_list "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}" additional_hostnames
   assert_output --regexp '^alumni\.zz-feature-x-[0-9]+
 extra\.zz-feature-x-[0-9]+$'
+}
+
+@test "start skips WORKTREE_COPY_FILES paths outside the project" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  printf '/.ddev/config.local.yaml\n/notes..txt\n' >"${SITE}/.gitignore"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+  printf 'web_environment:\n    - WORKTREE_COPY_FILES=.ddev/config.local.yaml ../outside.txt notes..txt\n' >"${SITE}/.ddev/config.local.yaml"
+  echo outside >"${TESTDIR}/outside.txt"
+  echo notes >"${SITE}/notes..txt"
+
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_line "Warning: Skipping ../outside.txt in WORKTREE_COPY_FILES; use a path inside the project."
+  # Two dots in a name are fine; only a .. directory leaves the project.
+  assert_line "Copied notes..txt"
 }
 
 @test "an existing worktree keeps the name an earlier version gave it" {
@@ -1215,4 +1260,171 @@ copied_worktree() {
   assert_success
   assert_line "Warning: Couldn't create a login link: Drush command terminated abnormally. Try: ddev drush uli --uri=https://${NAME}.ddev.site"
   assert_line '  "login_url": null'
+}
+
+# scaffold_worktree: a Composer project whose main checkout has the docroot
+# .gitignore that Drupal's scaffold writes where Git works, and a worktree of
+# it at WT. Starts run without Docker or DDEV. ddev composer install writes the
+# files in SCAFFOLD into the worktree but no .gitignore, as the scaffold does in
+# a web container where Git can't run.
+scaffold_worktree() {
+  printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
+  echo '{}' >"${SITE}/composer.json"
+  mkdir -p "${SITE}/web"
+  echo '<?php' >"${SITE}/web/index.php"
+  # The project ignores the scaffold's .gitignore files rather than commit them.
+  printf '/vendor/\n/web/.gitignore\n' >"${SITE}/.gitignore"
+  printf '/README.md\n' >"${SITE}/web/.gitignore"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  SCAFFOLD='web/README.md'
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  ddev() {
+    local f
+    if [[ "$*" == 'composer install' ]]; then
+      for f in ${SCAFFOLD}; do
+        mkdir -p "$(dirname "${f}")"
+        echo scaffold >"${f}"
+      done
+    fi
+  }
+  docker() { :; }
+}
+
+@test "start copies the main checkout's docroot .gitignore, so the worktree stays clean" {
+  scaffold_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Copied web/.gitignore from the main checkout"
+  run cat "${WT}/web/.gitignore"
+  assert_output "/README.md"
+  run git -C "${WT}" status --porcelain
+  assert_output ""
+  run git -C "${SITE}" status --porcelain
+  assert_output ""
+}
+
+@test "start copies nested .gitignore files, and the ones that ignore them" {
+  scaffold_worktree
+  # In the main checkout, each .gitignore ignores the one below it.
+  mkdir -p "${SITE}/web/sites/default"
+  printf '/README.md\n/sites/.gitignore\n' >"${SITE}/web/.gitignore"
+  printf '/example.sites.php\n/default/.gitignore\n' >"${SITE}/web/sites/.gitignore"
+  printf '/default.settings.php\n' >"${SITE}/web/sites/default/.gitignore"
+  # Nothing the scaffold writes is in the docroot .gitignore, so only the copied
+  # web/sites/.gitignore needs it.
+  SCAFFOLD='web/sites/example.sites.php web/sites/default/default.settings.php'
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Copied web/sites/.gitignore from the main checkout"
+  assert_line "Copied web/sites/default/.gitignore from the main checkout"
+  assert_line "Copied web/.gitignore from the main checkout"
+  run git -C "${WT}" status --porcelain
+  assert_output ""
+}
+
+@test "start leaves a .gitignore the main checkout doesn't ignore, and warns about what it hides" {
+  scaffold_worktree
+  # The main checkout's docroot .gitignore is untracked there, so a copy would
+  # be untracked in the worktree too.
+  printf '/vendor/\n' >"${SITE}/.gitignore"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "Copied web/.gitignore"
+  assert [ ! -e "${WT}/web/.gitignore" ]
+  assert_line "Warning: Startup created untracked files that nothing ignores:"
+  assert_line "  web/README.md"
+  assert_line "fire-worktree-remove refuses to delete this worktree until they're gone. If every checkout gets them, list them in the project's .gitignore."
+}
+
+@test "start never overwrites a .gitignore the worktree has" {
+  scaffold_worktree
+  echo '# mine' >"${WT}/web/.gitignore"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "Copied web/.gitignore"
+  assert_line "  web/README.md"
+  run cat "${WT}/web/.gitignore"
+  assert_output "# mine"
+}
+
+@test "rerunning start cleans a worktree an earlier start left dirty" {
+  scaffold_worktree
+  # What an earlier version's start left behind.
+  echo scaffold >"${WT}/web/README.md"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Copied web/.gitignore from the main checkout"
+  refute_output --partial "untracked"
+  run git -C "${WT}" status --porcelain
+  assert_output ""
+}
+
+@test "start warns about files the build leaves untracked, before the URLs, and succeeds" {
+  scaffold_worktree
+  printf 'web_environment:\n  - WORKTREE_BUILD_COMMAND=touch build-output.txt\n' >"${WT}/.ddev/config.local.yaml"
+  # A dump, so the start builds.
+  touch "${TESTDIR}/site-db.sql.gz"
+  run fw::start_worktree "${WT}" "${TESTDIR}/site-db.sql.gz" true
+  assert_success
+  NAME=$(fw::generated_name "${WT}")
+  local n=${#lines[@]}
+  assert_equal "${lines[n-5]}" "Warning: Startup created untracked files that nothing ignores:"
+  assert_equal "${lines[n-4]}" "  build-output.txt"
+  assert_equal "${lines[n-3]}" "fire-worktree-remove refuses to delete this worktree until they're gone. If every checkout gets them, list them in the project's .gitignore."
+  assert_equal "${lines[n-2]}" "Worktree URLs:"
+  assert_equal "${lines[n-1]}" "  https://${NAME}.ddev.site"
+  run cat "${WT}/.ddev/${FW_LOG_NAME}"
+  assert_line "  build-output.txt"
+}
+
+@test "the warning leaves out untracked files that were there before start" {
+  scaffold_worktree
+  printf '/vendor/\n' >"${SITE}/.gitignore"
+  echo mine >"${WT}/notes.txt"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "  web/README.md"
+  refute_output --partial "notes.txt"
+}
+
+@test "the warning lists a new file inside a directory that was already untracked" {
+  scaffold_worktree
+  mkdir -p "${WT}/notes"
+  echo mine >"${WT}/notes/mine.txt"
+  SCAFFOLD='web/README.md notes/out.txt dist/css/app.css'
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Warning: Startup created untracked files that nothing ignores:"
+  assert_line "  notes/out.txt"
+  # A directory that is new in its entirety is one line, as in git status.
+  assert_line "  dist/"
+  refute_output --partial "app.css"
+  refute_output --partial "mine.txt"
+  refute_line "  notes/"
+}
+
+@test "start copies .gitignore files from the main checkout, not a source checkout that's another worktree" {
+  scaffold_worktree
+  OTHER="${TESTDIR}/site-other"
+  git -C "${SITE}" worktree add -q -b other "${OTHER}"
+  mkdir -p "${OTHER}/web"
+  echo '# from the other worktree' >"${OTHER}/web/.gitignore"
+
+  T3CODE_PROJECT_ROOT="${OTHER}"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Copied web/.gitignore from the main checkout"
+  run cat "${WT}/web/.gitignore"
+  assert_output "/README.md"
+
+  rm "${WT}/web/.gitignore"
+  unset T3CODE_PROJECT_ROOT
+  WORKTREE_SOURCE_ROOT="${OTHER}"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "Copied web/.gitignore from the main checkout"
+  run cat "${WT}/web/.gitignore"
+  assert_output "/README.md"
 }
