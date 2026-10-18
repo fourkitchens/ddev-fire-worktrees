@@ -119,7 +119,7 @@ tool_sections() {
 
 # Tool sections whose tool runs nothing before deleting a worktree, so their
 # recipes have no teardown line.
-NO_TEARDOWN=(T3)
+NO_TEARDOWN=(T3 Cursor)
 
 # tool_line TOOL setup|teardown: the line in TOOL's section of the page, with its
 # file format's quoting undone. Each tool section needs a case here: pick out
@@ -127,6 +127,13 @@ NO_TEARDOWN=(T3)
 tool_line() {
   case "$1:$2" in
     T3:setup) t3_action 'Start worktree' ;;
+    Orca:setup) section Orca | yaml_block setup | unquote yaml-block ;;
+    Orca:teardown) section Orca | yaml_block archive | unquote yaml-block ;;
+    Conductor:setup) section Conductor | toml_key setup | unquote toml-literal ;;
+    Conductor:teardown) section Conductor | toml_key archive | unquote toml-literal ;;
+    Cursor:setup) section Cursor | json_array setup-worktree | unquote json ;;
+    Superset:setup) section Superset | json_array setup | unquote json ;;
+    Superset:teardown) section Superset | json_array teardown | unquote json ;;
     *)
       echo "tool_line has no case for the ${2} line in the ${1} section" >&2
       return 1
@@ -145,12 +152,42 @@ json_member() {
   sed -nE 's/.*"'"$1"'": ("([^"\\]|\\.)*").*/\1/p'
 }
 
+# json_array KEY: the quoted string elements of the first "KEY": array on
+# stdin, one per line, quotes and escapes included. Each element is on a line of
+# its own.
+json_array() {
+  awk -v key="\"$1\": [" '
+    inside && /^ *\]/ { exit }
+    inside
+    { line = $0; sub(/^ +/, "", line); if (line == key) inside = 1 }
+  ' | sed -nE 's/^ *("([^"\\]|\\.)*"),?$/\1/p'
+}
+
+# yaml_block KEY: the first line of the block scalar of the first "KEY: |" on
+# stdin, indentation included.
+yaml_block() {
+  awk -v key="$1: |" '
+    inside { print; exit }
+    { line = $0; sub(/^ +/, "", line); inside = (line == key) }
+  '
+}
+
+# toml_key KEY: the single-quoted string value of each "KEY = " line on stdin,
+# quotes included.
+toml_key() {
+  sed -nE "s/^$1 = ('.*')\$/\1/p"
+}
+
 # unquote FORMAT: undo FORMAT's quoting of the string literal on stdin.
 unquote() {
   case $1 in
     # Strip the quotes and the backslash of each escape; the lines need no
     # escapes but \" and \\.
     json) sed -E 's/^"(.*)"$/\1/; s/\\(.)/\1/g' ;;
+    # A block scalar's only quoting is its indentation.
+    yaml-block) sed -E 's/^ +//' ;;
+    # A literal string has no escapes.
+    toml-literal) sed -E "s/^'(.*)'\$/\1/" ;;
     *)
       echo "unquote knows no format ${1}" >&2
       return 1

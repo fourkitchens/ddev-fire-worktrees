@@ -138,3 +138,91 @@ thread. If you forget, **Find orphaned worktree environments** lists what's left
 with `ddev fire-worktree-prune --yes`. T3's storage cleanup can also delete worktrees without
 running anything, which startup's notice about lost checkouts catches. Like the setup line, both
 actions fall back to the main checkout's copy on a branch older than the add-on.
+
+## Orca
+
+For [Orca](https://www.onorca.dev), add this to the project's `orca.yaml`:
+
+```yaml
+scripts:
+  setup: |
+    if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi
+  archive: |
+    if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true
+setupAgentStartupPolicy: wait-for-setup
+```
+
+`setupAgentStartupPolicy: wait-for-setup` keeps the agent waiting until startup finishes.
+
+Orca takes the setup script from the new worktree's `orca.yaml`, so a worktree on a branch without
+the file, such as one older than the recipe, runs no setup. To start those too, each person can put
+the setup line in Orca's own hook, in Settings → Repository, set to local-only or run-both; that hook
+runs on every branch. Local-only ignores `orca.yaml`'s scripts, so give the hook the teardown line
+as its archive script too.
+
+Orca takes the archive script from the main checkout's `orca.yaml`, runs it with no terminal, and
+stops it after 2 minutes. `orca worktree rm` runs it only with `--run-hooks`.
+
+## Conductor
+
+For [Conductor](https://www.conductor.build), add this to the project's `.conductor/settings.toml`:
+
+```toml
+[scripts]
+setup = 'if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-start"; fi'
+archive = 'if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ddev/commands/host/fire-worktree-remove" --keep-checkout --yes; fi || true'
+```
+
+The single quotes make each line a TOML literal string, which holds its double quotes without
+escaping.
+
+Conductor's Mac app reads this file from the default branch on the remote, so merge it before you
+expect new workspaces to use it.
+
+Conductor starts the agent alongside setup and documents no setting to make it wait, so the
+agent's first steps may come before the site is running.
+
+## Cursor
+
+For [Cursor](https://cursor.com), add this to the project's `.cursor/worktrees.json`:
+
+```json
+{
+  "setup-worktree": [
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+  ]
+}
+```
+
+Cursor reads the worktree's `.cursor/worktrees.json`, then the project root's, so a worktree on a
+branch older than the file still runs setup.
+
+Cursor has no teardown, and once it has more worktrees than `cursor.worktreeMaxCount` (25 by
+default), it deletes older ones without running anything. Rely on startup's notice and
+[`prune`](#tools-without-teardown) to clean up after it.
+
+Cursor doesn't document whether setup finishes before the agent starts, so the agent may start
+before the site is running. To check on setup, open the Output panel and select "Worktrees Setup".
+
+## Superset
+
+For [Superset](https://superset.sh), add this to the project's `.superset/config.json`:
+
+```json
+{
+  "setup": [
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+  ],
+  "teardown": [
+    "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout --yes; fi || true"
+  ]
+}
+```
+
+Superset reads the main checkout's `.superset/config.json`, which a worktree's own copy can
+override, so a worktree on a branch older than the file still runs setup.
+
+By default the agent starts alongside setup. To keep it waiting until startup finishes, each person
+turns on Settings → Experimental → "Wait for workspace setup before starting agents".
+
+Superset runs teardown with no visible terminal and stops it after 60 seconds.
