@@ -491,6 +491,24 @@ other_checkout() {
   refute_output --partial other-gone-3
 }
 
+@test "prune lists unregistered projects with the default prefix from a checkout with the team's prefix" {
+  old_branch_site
+
+  # A project that a worktree on a branch older than the prefix got from an
+  # earlier version, which didn't ask the main checkout.
+  docker() {
+    case $* in
+      'volume ls -q') printf 'mysite-feature-old-1-mariadb\n' ;;
+    esac
+  }
+  ddev() { :; }
+  export -f ddev docker
+  cd "${SITE}"
+  run "${DIR}/commands/host/fire-worktree-prune"
+  assert_success
+  assert_line "  mysite-feature-old-1"
+}
+
 @test "parallel registry writes keep every entry" {
   printf 'name: mysite\n' >"${SITE}/.ddev/config.yaml"
   git_site
