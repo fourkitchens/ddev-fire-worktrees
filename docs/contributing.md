@@ -1,5 +1,7 @@
 # Contributing
 
+For how to go from an idea or an issue to a pull request, see [Workflow](workflow.md).
+
 ## Running the tests
 
 ```bash
@@ -10,6 +12,8 @@ bats ./tests/lib.bats                           # library tests, a few seconds, 
 bats ./tests/create.bats                        # create's branch and pull request handling, no Docker
 bats ./tests --filter-tags '!release'           # everything, with real DDEV projects
 ```
+
+The tests need bats 1.5.0 or later.
 
 The DDEV tests start real projects, including a Drupal 11 site and a Postgres project, under
 `~/tmp`, and delete them afterwards. They take about seven minutes on a laptop.

@@ -131,14 +131,29 @@ in `.ddev/fire-worktree-start.log`.
 * **Uploaded files.** Worktrees start without `sites/default/files`. Use
   [Stage File Proxy](https://www.drupal.org/project/stage_file_proxy) to fetch them from the remote
   site on demand.
-* **Branch in the environment indicator.** In a worktree, `.git` is a file that points outside the
-  container, so code that reads `../.git/HEAD` must skip the label when that path isn't readable.
+* **Branch in the environment indicator.** DDEV mounts your main checkout's `.git` directory into
+  the web container, but not a worktree's. In a worktree, `.git` is a file: Mutagen leaves it out
+  of the container, and without Mutagen it points to a path that exists only on the host. Code that
+  reads `../.git/HEAD` or runs `git` fails there, and with `display_errors` on, Drupal prints PHP
+  warnings on every page and Drush command. Skip that code when `.git/HEAD` isn't readable, so
+  worktrees show no branch:
+
+  ```php
+  $git_head = $app_root . '/../.git/HEAD';
+  if (is_readable($git_head)) {
+    $branch = preg_replace('#^ref: refs/heads/#', '', trim(file_get_contents($git_head)));
+    $config['environment_indicator.indicator']['name'] = 'Local: ' . $branch;
+  }
+  ```
+
+  Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Startup, refresh and
+  `info` warn that a file `reads Git metadata, which a worktree's container doesn't have` when
+  Drush's output shows the problem, and name the file and line when they can.
 * **Scaffold files in `git status`.** Drupal's Composer scaffold writes files such as
   `web/README.md`, and `.gitignore` files that hide them, but it writes the `.gitignore` files only
-  when it can run Git. In a worktree's web container it can't: Mutagen doesn't sync the worktree's
-  `.git` file, and without Mutagen that file points at a path in your main checkout that isn't
-  mounted. So after `ddev composer install`, startup copies each missing scaffold `.gitignore` from
-  your main checkout and prints `Copied <path> from the main checkout`. A worktree you haven't
+  when it can run Git, which it can't in a worktree's web container, for the reason above. So after
+  `ddev composer install`, startup copies each missing scaffold `.gitignore` from your main
+  checkout and prints `Copied <path> from the main checkout`. A worktree you haven't
   edited then has a clean `git status`, and `ddev fire-worktree-remove` deletes it. To clean up a
   worktree an earlier version left with untracked scaffold files, rerun `ddev fire-worktree-start`
   in it.
