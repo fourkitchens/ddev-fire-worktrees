@@ -854,7 +854,8 @@ fw::copy_gitignores() {
     while IFS= read -r src; do
       # Git can answer with a file outside the project, such as a global
       # excludes file, which check-ignore can't take.
-      fw::inside_project "$src" && [[ "$(basename "$src")" == .gitignore ]] || continue
+      [[ "$(basename "$src")" == .gitignore ]] || continue
+      fw::inside_project "$src" || continue
       git -C "$FW_PRIMARY_ROOT" check-ignore -q -- "$src" || continue
       if fw::copy_missing "$FW_PRIMARY_ROOT" "$src" 'from the main checkout'; then
         more=true
