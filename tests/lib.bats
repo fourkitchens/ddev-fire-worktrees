@@ -628,6 +628,66 @@ YAML
   assert_line --index 0 "        source: \"${TESTDIR}/moved/.git\""
 }
 
+@test "WORKTREE_MOUNT_GIT=false deletes the Git mount files start wrote, and never one it didn't" {
+  git_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  printf 'web_environment: [WORKTREE_MOUNT_GIT=false]\n' >"${WT}/.ddev/config.local.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert [ ! -e "${WT}/.ddev/docker-compose.fire-worktree-git.yaml" ]
+  assert [ ! -e "${WT}/.ddev/fire-worktree-git" ]
+
+  # Files the add-on didn't write stay, and don't stop startup while it's off.
+  printf 'services:\n  web: {}\n' >"${WT}/.ddev/docker-compose.fire-worktree-git.yaml"
+  echo 'gitdir: /somewhere/else' >"${WT}/.ddev/fire-worktree-git"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_equal "$(cat "${WT}/.ddev/docker-compose.fire-worktree-git.yaml")" "$(printf 'services:\n  web: {}')"
+  assert_equal "$(cat "${WT}/.ddev/fire-worktree-git")" 'gitdir: /somewhere/else'
+}
+
+@test "start refuses a WORKTREE_MOUNT_GIT other than true or false" {
+  git_worktree
+  printf 'web_environment: [WORKTREE_MOUNT_GIT=no]\n' >"${WT}/.ddev/config.local.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "WORKTREE_MOUNT_GIT must be true or false; got no."
+}
+
+@test "with DDEV's global no_bind_mounts, start skips the Git mount and deletes its files without a word" {
+  git_worktree
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  local before=$output
+  printf 'instrumentation_opt_in: false\nno_bind_mounts: true\n' >"${DDEV_GLOBAL_DIR}/global_config.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert [ ! -e "${WT}/.ddev/docker-compose.fire-worktree-git.yaml" ]
+  assert [ ! -e "${WT}/.ddev/fire-worktree-git" ]
+  assert_equal "${output}" "${before}"
+
+  printf 'no_bind_mounts: false\n' >"${DDEV_GLOBAL_DIR}/global_config.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert [ -f "${WT}/.ddev/fire-worktree-git" ]
+}
+
+@test "a failed ddev start with the Git mount on names WORKTREE_MOUNT_GIT=false, and without it doesn't" {
+  git_worktree
+  ddev() { [[ "$1" != start ]]; }
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "ddev start failed."
+  assert_line "If the error is about mounting ${SITE}/.git, set WORKTREE_MOUNT_GIT=false in web_environment and rerun."
+
+  printf 'web_environment: [WORKTREE_MOUNT_GIT=false]\n' >"${WT}/.ddev/config.local.yaml"
+  run fw::start_worktree "${WT}" fresh false
+  assert_failure
+  assert_line "ddev start failed."
+  refute_output --partial WORKTREE_MOUNT_GIT
+}
+
 @test "reads WORKTREE_BUILD_FAILURE" {
   printf 'type: php
 ' >"${SITE}/.ddev/config.yaml"

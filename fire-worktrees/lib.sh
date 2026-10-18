@@ -1018,6 +1018,31 @@ fw::check_git_mount() {
   done < <(fw::git_mount_files)
 }
 
+# fw::mounts_git: true when startup mounts the shared Git directory, the
+# default. WORKTREE_MOUNT_GIT=false turns it off, and so does DDEV's global
+# no_bind_mounts (for remote Docker), where a host path can't be mounted.
+fw::mounts_git() {
+  local mount global="${DDEV_GLOBAL_DIR:-$HOME/.ddev}/global_config.yaml"
+  mount=$(fw::setting "$FW_ROOT" WORKTREE_MOUNT_GIT true)
+  case $mount in
+    true) ;;
+    false) return 1 ;;
+    *) fw::die "WORKTREE_MOUNT_GIT must be true or false; got $mount." ;;
+  esac
+  [[ ! -f "$global" || "$(fw::yaml_scalar "$global" no_bind_mounts)" != true ]]
+}
+
+# fw::remove_git_mount: delete the Git mount files this add-on wrote in
+# FW_ROOT, and leave any others.
+fw::remove_git_mount() {
+  local f
+  while IFS= read -r f; do
+    if fw::owns_git_mount_file "$FW_ROOT/$f"; then
+      rm -f "$FW_ROOT/$f"
+    fi
+  done < <(fw::git_mount_files)
+}
+
 # fw::write_git_mount: write FW_ROOT's Git mount. The Compose file mounts the
 # shared Git directory read-only at FW_GIT_MOUNT, and a generated .git file
 # read-only over the worktree's, pointing Git there. Read-only, because the
@@ -1185,15 +1210,25 @@ fw::start_worktree() {
   return "$status"
 }
 
+# fw::start_failed MOUNT_GIT: stop after ddev start fails. When startup mounted
+# the shared Git directory (MOUNT_GIT is true), say how to turn that off, since
+# Docker can't mount every path. Docker providers word the error differently,
+# so don't parse it.
+fw::start_failed() {
+  if [[ "$1" == true ]]; then
+    fw::die $'ddev start failed.\n'"If the error is about mounting $FW_COMMON_DIR, set WORKTREE_MOUNT_GIT=false in web_environment and rerun."
+  fi
+  fw::die 'ddev start failed.'
+}
+
 # fw::start_steps DB BUILD: fw::start_worktree's work, in FW_ROOT.
 fw::start_steps() {
-  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' item nested=false composer_root untracked new_db=false empty=false on_failure build_failed=false
+  local db=$1 build=$2 primary cfg legacy source prefix dir slug suffix f seed='' dump='' item nested=false composer_root untracked new_db=false empty=false on_failure build_failed=false mount_git=false
   cfg=".ddev/$FW_CONFIG_NAME"
   legacy=.ddev/config.worktree.yaml
   if [[ (-e "$cfg" || -L "$cfg") ]] && ! fw::is_generated "$cfg"; then
     fw::die "Refusing to overwrite $cfg; this add-on didn't write it."
   fi
-  fw::check_git_mount
   if [[ -e "$legacy" ]] && ! fw::is_generated "$legacy" && [[ -n "$(fw::yaml_scalar "$legacy" name)" ]]; then
     fw::die "$legacy sets name: and loads after $cfg. Remove it or its name: line."
   fi
@@ -1213,6 +1248,12 @@ fw::start_steps() {
   # the primary.
   source=${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-$FW_PRIMARY_ROOT}}
   fw::copy_files "$source"
+  # Read after copying, so a copied config.local.yaml can turn the mount off.
+  # While it's off, files the add-on didn't write at its paths don't matter.
+  if fw::mounts_git; then
+    mount_git=true
+    fw::check_git_mount
+  fi
 
   # Reuse the name of an existing environment, including ones the replaced
   # project-local commands created, so the worktree keeps its database.
@@ -1242,7 +1283,11 @@ fw::start_steps() {
     fw::die "Refusing to give this worktree the primary project's name, $primary."
   fi
   fw::write_config "$primary"
-  fw::write_git_mount
+  if [[ "$mount_git" == true ]]; then
+    fw::write_git_mount
+  else
+    fw::remove_git_mount
+  fi
   if fw::is_generated "$legacy"; then
     rm -f "$legacy"
   fi
@@ -1279,9 +1324,9 @@ fw::start_steps() {
   if [[ "$nested" == true ]]; then
     # DDEV asks whether to use an unregistered nested project, defaulting to the
     # project around it. Answer yes; starting registers it for later commands.
-    DDEV_NONINTERACTIVE=false ddev start ${seed:+"--seed-snapshot=$seed"} <<<y || fw::die 'ddev start failed.'
+    DDEV_NONINTERACTIVE=false ddev start ${seed:+"--seed-snapshot=$seed"} <<<y || fw::start_failed "$mount_git"
   else
-    ddev start ${seed:+"--seed-snapshot=$seed"} || fw::die 'ddev start failed.'
+    ddev start ${seed:+"--seed-snapshot=$seed"} || fw::start_failed "$mount_git"
   fi
   fw::unlock
   fw::import_dump "$dump"

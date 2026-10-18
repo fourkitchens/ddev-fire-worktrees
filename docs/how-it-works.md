@@ -109,3 +109,7 @@ Commands that write, such as `git commit`, fail with "Read-only file system". Ru
   `ddev start` and `ddev restart` use the files as they are. A worktree started before this add-on
   mounted Git gets the mount on its next `fire-worktree-start`.
 * **Not committed.** Startup adds both files to `.git/info/exclude`.
+* **Turning it off.** With `WORKTREE_MOUNT_GIT=false`, or DDEV's global `no_bind_mounts` set for
+  remote Docker, startup deletes both files if it wrote them, so the container has no Git metadata
+  again. It leaves files it didn't write, and doesn't refuse to start over them. When `ddev start`
+  fails with the mount on, startup names the shared Git directory and the setting.
