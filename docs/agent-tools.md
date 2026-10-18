@@ -65,8 +65,7 @@ For [T3](https://t3.codes), add these actions to the project's `t3.json`:
 ```
 
 **Start worktree** runs when T3 creates a thread's worktree. Startup copies local files, and any
-`WORKTREE_*` setting the worktree's own config lacks, from the checkout T3 names in
-`T3CODE_PROJECT_ROOT`. On a branch with an older version of the add-on, startup takes only the
+`WORKTREE_*` setting the worktree's own config lacks, from the main checkout. On a branch with an older version of the add-on, startup takes only the
 local files from it, not the settings. Leave `previewUrl` out of these actions: a fixed URL previews the primary project from
 every thread.
 

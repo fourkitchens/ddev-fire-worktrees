@@ -12,7 +12,7 @@ _Avoid_: primary checkout
 
 **Source checkout**:
 The checkout a worktree's startup copies local files and settings from: the checkout that ran
-`create`, else `T3CODE_PROJECT_ROOT`, else the main checkout.
+`create`, else the main checkout.
 _Avoid_: creating checkout
 
 **Primary project**:
