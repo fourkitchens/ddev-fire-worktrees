@@ -108,6 +108,17 @@ shared_line() {
   '
 }
 
+# command_line COMMAND [ARGS]: the setup line, running COMMAND with ARGS where
+# it runs fire-worktree-start.
+command_line() {
+  local line args=${2:+ $2}
+  line=$(shared_line setup)
+  line=${line//fire-worktree-start/$1}
+  line=${line/"ddev $1;"/"ddev $1$args;"}
+  line=${line/"$1\";"/"$1\"$args;"}
+  printf '%s\n' "${line}"
+}
+
 # tool_sections: the title of each tool's section, one per line: every "##"
 # section but "Any agent tool".
 tool_sections() {
@@ -316,4 +327,15 @@ project_of() {
       assert_output "${teardown_line}"
     fi
   done <<<"${tools}"
+}
+
+@test "T3's manual actions find the main checkout's copy as the setup line does" {
+  # T3 runs them in a terminal, so they ask before deleting and show a failure,
+  # unlike the teardown line.
+  run t3_action 'Delete worktree environment'
+  assert_success
+  assert_output "$(command_line fire-worktree-remove --keep-checkout)"
+  run t3_action 'Find orphaned worktree environments'
+  assert_success
+  assert_output "$(command_line fire-worktree-prune)"
 }
