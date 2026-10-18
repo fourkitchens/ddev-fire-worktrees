@@ -580,7 +580,7 @@ other_checkout() {
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
@@ -608,7 +608,7 @@ other_checkout() {
   ddev() { :; }
   docker() { :; }
   export -f ddev docker
-  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  unset WORKTREE_SOURCE_ROOT
   cd "${WT}"
   run "${DIR}/commands/host/fire-worktree-start" --db=fresh --no-build
   assert_success
