@@ -1,0 +1,13 @@
+<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file(/var/www/html/web/../.git/HEAD): Failed to open stream: No such file or directory in <em class="placeholder">include()</em> (line <em class="placeholder">137</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 137)
+Drupal\Core\Site\Settings::initialize() (Line: 1110)
+Drupal\Core\DrupalKernel->initializeSettings() (Line: 116)
+Drush\Boot\DrupalBoot8->bootstrapDrupalSiteValidate() (Line: 247)
+Drush\Boot\BootstrapManager->doBootstrap() (Line: 191)
+Drush\Runtime\Runtime->doRun() (Line: 67)
+</pre></details><details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: Trying to access array offset on value of type bool in <em class="placeholder">include()</em> (line <em class="placeholder">138</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 138)
+Drupal\Core\Site\Settings::initialize() (Line: 1110)
+Drupal\Core\DrupalKernel->initializeSettings() (Line: 116)
+</pre></details><details class="error-with-backtrace"><summary><em class="placeholder">Deprecated function</em>: explode(): Passing null to parameter #2 ($string) of type string is deprecated in <em class="placeholder">include()</em> (line <em class="placeholder">138</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">explode() (Line: 138)
+include() (Line: 138)
+Drupal\Core\Site\Settings::initialize() (Line: 1110)
+</pre></details>

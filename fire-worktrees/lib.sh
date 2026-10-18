@@ -713,18 +713,60 @@ fw::error_line() {
 # the worktree inherited from the primary checkout. Drupal can print an HTML
 # warning to stdout with no newline before the link, so take the last URL.
 # Without a link, it prints the first line of Drush's error instead, and fails.
+# Either way, it warns when Drush's output shows Drupal reading Git metadata.
 fw::login_link() {
-  local link err status=0
-  err=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || return 1
-  link=$(ddev drush uli --no-browser --uri="$1" 2>"$err" | grep -oE 'https?://[^[:space:]<>"]+' | tail -n 1) || true
+  local link out err status=0
+  out=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || return 1
+  err=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || {
+    rm -f "$out"
+    return 1
+  }
+  ddev drush uli --no-browser --uri="$1" >"$out" 2>"$err" || true
+  fw::check_git_metadata "$out" "$err"
+  link=$(grep -oE 'https?://[^[:space:]<>"]+' "$out" | tail -n 1) || true
   if [[ -n "$link" ]]; then
     printf '%s' "$link"
   else
     fw::error_line "$err"
     status=1
   fi
-  rm -f "$err"
+  rm -f "$out" "$err"
   return "$status"
+}
+
+# fw::check_git_metadata FILE...: warn when Drush's output in FILE shows Drupal
+# reading Git metadata, which a worktree's container doesn't have: a /.git/ path
+# or git's "not a git repository". Name the file and line from the first such
+# message that has one, in Drupal's "(line N of FILE)" form, FILE relative to the
+# docroot, or PHP's "in FILE on line N" form, FILE a container path.
+fw::check_git_metadata() {
+  local docroot='' where
+  if [[ -n "${FW_ROOT:-}" ]]; then
+    docroot=$(fw::config_scalar "$FW_ROOT" docroot)
+  fi
+  where=$(awk -v docroot="${docroot:+$docroot/}" '
+    { sub(/\r$/, "") }
+    /\/\.git\/|not a git repository/ {
+      found = 1
+      line = $0
+      gsub(/<\/?em[^>]*>/, "", line)
+      if (match(line, /\(line [0-9]+ of [^)]+\)/)) {
+        s = substr(line, RSTART + 6, RLENGTH - 7)
+        n = s; sub(/ of .*/, "", n)
+        f = s; sub(/^[0-9]+ of /, "", f)
+        print docroot f " line " n
+        exit
+      }
+      if (match(line, / in \/[^ ]+ on line [0-9]+/)) {
+        s = substr(line, RSTART + 4, RLENGTH - 4)
+        f = s; sub(/ on line .*/, "", f); sub(/^\/var\/www\/html\//, "", f)
+        n = s; sub(/.* on line /, "", n)
+        print f " line " n
+        exit
+      }
+    }
+    END { exit !found }' "$@") || return 0
+  fw::warn "${where:-Drupal} reads Git metadata, which a worktree's container doesn't have, so Drupal prints PHP warnings on every page and Drush command. Skip that code when .git/HEAD isn't readable. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
 }
 
 # fw::json TEXT: TEXT as a JSON string, or null when it's empty.
