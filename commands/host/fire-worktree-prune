@@ -60,14 +60,19 @@ fi
 # Projects from the project-local commands this add-on replaced have no registry
 # entry, and neither do volumes that earlier versions of prune left behind. Their
 # names can't prove which clone created them, so only list them. A worktree on
-# a branch without WORKTREE_NAME_PREFIX takes the prefix of the checkout that
-# created it, so look for this checkout's prefix and the main checkout's.
+# a branch without WORKTREE_NAME_PREFIX takes the prefix of its source checkout,
+# and before this version could get the default, so look for this checkout's
+# prefix, the main checkout's and the default.
 primary=$(fw::primary_name)
 prefixes=$(
-  for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do
-    fw::slug "$(fw::setting "$root" WORKTREE_NAME_PREFIX "$primary")" 12
+  {
+    for root in "$FW_ROOT" ${FW_PRIMARY_ROOT:+"$FW_PRIMARY_ROOT"}; do
+      fw::slug "$(fw::setting "$root" WORKTREE_NAME_PREFIX "$primary")" 12
+      echo
+    done
+    fw::slug "$primary" 12
     echo
-  done | sort -u | paste -sd '|' -
+  } | sort -u | paste -sd '|' -
 )
 unregistered=
 while IFS= read -r name; do

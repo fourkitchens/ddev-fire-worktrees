@@ -228,9 +228,10 @@ fw::web_environment() {
 
 # fw::source_checkout: the checkout a worktree takes the local files and
 # settings it lacks from: WORKTREE_SOURCE_ROOT, the checkout that ran create,
-# else T3's T3CODE_PROJECT_ROOT. Empty when neither is set.
+# else T3's T3CODE_PROJECT_ROOT, else the main checkout. Empty in a bare
+# repository.
 fw::source_checkout() {
-  printf '%s' "${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-}}"
+  printf '%s' "${WORKTREE_SOURCE_ROOT:-${T3CODE_PROJECT_ROOT:-${FW_PRIMARY_ROOT:-}}}"
 }
 
 # fw::setting DIR NAME DEFAULT: NAME from web_environment, where a later file
@@ -1264,7 +1265,7 @@ fw::start_steps() {
   # Copy local files first, so a copied config.local.yaml sets the name and
   # hostnames.
   source=$(fw::source_checkout)
-  fw::copy_files "${source:-$FW_PRIMARY_ROOT}"
+  fw::copy_files "$source"
   # Read after copying, so a copied config.local.yaml can turn the mount off.
   # While it's off, files the add-on didn't write at its paths don't matter.
   if fw::mounts_git; then

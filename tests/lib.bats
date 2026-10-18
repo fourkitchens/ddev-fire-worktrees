@@ -412,6 +412,39 @@ extra\.zz-feature-x-[0-9]+$'
   assert_equal "$(fw::generated_name "${WT}")" mysite-feature-add-retry-logic-2792006950
 }
 
+# old_branch_site: a main checkout on a commit with the team's settings, and a
+# worktree, WT, on a branch from before them. Writes a dump, DUMP, to start
+# from, so startup builds.
+old_branch_site() {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  printf '/notes.txt\n' >"${SITE}/.gitignore"
+  git_site
+  WT="${TESTDIR}/site-feature-old"
+  git -C "${SITE}" worktree add -q -b feature/old "${WT}"
+  printf 'name: mysite\ntype: php\nweb_environment:\n  - WORKTREE_NAME_PREFIX=team\n  - WORKTREE_COPY_FILES=notes.txt\n  - WORKTREE_BUILD_COMMAND=echo team build\n' >"${SITE}/.ddev/config.yaml"
+  git -C "${SITE}" -c user.email=test@example.com -c user.name=Test commit -qam 'Add the team settings'
+  echo 'from the main checkout' >"${SITE}/notes.txt"
+  DUMP="${TESTDIR}/site-db.sql.gz"
+  touch "${DUMP}"
+}
+
+@test "a branch older than the team's settings starts with the main checkout's prefix, copy list and build command" {
+  old_branch_site
+
+  # Start without Docker or DDEV, and without create naming a checkout.
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT
+  run fw::start_worktree "${WT}" "${DUMP}" true
+  assert_success
+  assert_line --regexp '^Configured DDEV project team-feature-old-[0-9]+$'
+  assert_line "Copied notes.txt"
+  assert_line "Building with: echo team build"
+  assert_line "team build"
+  run cat "${WT}/notes.txt"
+  assert_output 'from the main checkout'
+}
+
 @test "copies local files from T3CODE_PROJECT_ROOT rather than the main checkout" {
   printf 'name: mysite\ntype: php\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
   printf '/.ddev/config.local.yaml\n/web/sites/default/settings.local.php\n' >"${SITE}/.gitignore"
