@@ -30,7 +30,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   at the end of the cut, as in `mysite-abc-123-hero-base-1234567890`. The name stays the same when
   you rename the branch, and a rerun keeps the name the worktree already has. DDEV
   gitignores the file and loads it after `config.local.yaml`; startup also adds it to
-  `.git/info/exclude`.
+  `.git/info/exclude`. The file has a `#ddev-silent-no-warn` line, so DDEV leaves it out of the
+  custom configuration it lists on every start.
 * **Hostnames.** Each `additional_hostnames` entry is rewritten for the worktree, and
   `additional_fqdns` and fixed host ports are left out. See
   [Multi-domain and multisite projects](drupal.md#multi-domain-and-multisite-projects).

@@ -947,6 +947,9 @@ fw::write_config() {
   fqdns=$(fw::config_list "$FW_ROOT" additional_fqdns | tr '\n' ' ')
   {
     printf '%s\n' "$FW_MARKER"
+    # Keep this file out of the custom configuration DDEV lists on every start.
+    # fw::is_generated reads only the first line.
+    printf '#ddev-silent-no-warn\n'
     # Replace rather than merge these keys, so this project never claims the
     # primary checkout's hostnames or host ports.
     printf 'override_config: true\nname: %s\n' "$FW_NAME"
