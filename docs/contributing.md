@@ -1,5 +1,7 @@
 # Contributing
 
+For how to go from an idea or an issue to a pull request, see [Workflow](workflow.md).
+
 ## Running the tests
 
 ```bash
