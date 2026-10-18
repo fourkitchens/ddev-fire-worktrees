@@ -515,19 +515,48 @@ fw::registry_add() {
   fw::with_registry_lock fw::registry_put "$1" "$2"
 }
 
-# fw::notice_gone_checkouts: say how many registry entries' checkouts are gone,
-# such as after an agent tool deleted worktrees without running anything, and
-# how to delete their environments. Reads only the registry and the filesystem,
-# and changes neither: a checkout on a drive that isn't mounted looks gone too.
-fw::notice_gone_checkouts() {
-  local file name path count=0
+# fw::live_names: the project names in the generated configs of the worktrees
+# Git lists for this repository whose checkout is there, one per line.
+fw::live_names() {
+  local line path
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        if [[ -d "$path" ]]; then
+          fw::generated_name "$path"
+          echo
+        fi
+        ;;
+    esac
+  done < <(git -C "$FW_ROOT" worktree list --porcelain)
+}
+
+# fw::gone_entries: the registry's "<name><TAB><path>" lines whose checkout is
+# gone, which prune deletes: no checkout Git lists holds the name. A worktree
+# moved with git worktree move keeps its name, so it isn't gone. Reads only the
+# registry, Git and the filesystem.
+fw::gone_entries() {
+  local file live name path
   file=$(fw::registry_file)
   [[ -f "$file" ]] || return 0
+  live=$(fw::live_names)
   while IFS=$'\t' read -r name path; do
-    if [[ -n "$name" && ! -d "$path" ]]; then
-      count=$((count + 1))
+    [[ -n "$name" ]] || continue
+    if ! grep -qxF "$name" <<<"$live"; then
+      printf '%s\t%s\n' "$name" "$path"
     fi
   done <"$file"
+}
+
+# fw::notice_gone_checkouts: say how many registry entries' checkouts are gone,
+# such as after an agent tool deleted worktrees without running anything, and
+# how to delete their environments. Asks fw::gone_entries, as prune does, so it
+# counts what prune deletes. Changes nothing and doesn't ask Docker: a checkout
+# on a drive that isn't mounted looks gone too.
+fw::notice_gone_checkouts() {
+  local count
+  count=$(fw::gone_entries | awk 'END { print NR }')
   if [[ "$count" == 1 ]]; then
     echo '1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes'
   elif [[ "$count" -gt 1 ]]; then

@@ -570,27 +570,28 @@ other_checkout() {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site
   git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
-  # Two worktrees an agent tool deleted without running anything, and one
-  # that's still there.
-  git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
-  printf 'mysite-gone-1\t%s\nmysite-gone-2\t%s\nmysite-kept-3\t%s\n' \
-    "${TESTDIR}/site-feature-gone-1" "${TESTDIR}/site-feature-gone-2" "${TESTDIR}/site-feature-kept" \
-    >"${SITE}/.git/fire-worktrees"
 
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
   unset WORKTREE_SOURCE_ROOT
+  local name registry
+  for name in x kept away; do
+    [[ $name == x ]] || git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-feature-$name"
+    fw::start_worktree "${TESTDIR}/site-feature-$name" fresh false >/dev/null
+  done
+  # A worktree an agent tool deleted without running anything, one on a drive
+  # that isn't mounted, and one that's still there.
+  printf 'mysite-gone-1\t%s\n' "${TESTDIR}/site-feature-gone-1" >>"${SITE}/.git/fire-worktrees"
+  registry=$(sort "${SITE}/.git/fire-worktrees")
+  mv "${TESTDIR}/site-feature-away" "${TESTDIR}/unmounted"
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
-  run cut -f1 "${SITE}/.git/fire-worktrees"
-  assert_line mysite-gone-1
-  assert_line mysite-gone-2
-  assert_line mysite-kept-3
+  assert_equal "$(sort "${SITE}/.git/fire-worktrees")" "${registry}"
 
   # A drive that's mounted again brings its checkout back.
-  mkdir "${TESTDIR}/site-feature-gone-2"
+  mv "${TESTDIR}/unmounted" "${TESTDIR}/site-feature-away"
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
   assert_line "1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes"
@@ -602,19 +603,75 @@ other_checkout() {
   WT="${TESTDIR}/site-feature-x"
   git -C "${SITE}" worktree add -q -b feature/x "${WT}"
   git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
-  printf 'mysite-kept-3\t%s\n' "${TESTDIR}/site-feature-kept" >"${SITE}/.git/fire-worktrees"
 
   # Run the command itself, which sets -e, without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
   export -f ddev docker
   unset WORKTREE_SOURCE_ROOT
+  fw::start_worktree "${TESTDIR}/site-feature-kept" fresh false >/dev/null
   cd "${WT}"
   run "${DIR}/commands/host/fire-worktree-start" --db=fresh --no-build
   assert_success
   assert_output --partial "Worktree URLs:"
   refute_output --partial "lost"
   refute_output --partial "fire-worktree-prune"
+}
+
+@test "prune --yes deletes every environment the startup notice counts" {
+  git_worktree
+  local name gone
+  for name in pruned listed; do
+    git -C "${SITE}" worktree add -q -b "feature/$name" "${TESTDIR}/site-$name"
+    fw::start_worktree "${TESTDIR}/site-$name" fresh false >/dev/null
+  done
+  # Two started worktrees an agent tool deleted: git worktree prune already
+  # dropped one, and Git still lists the other.
+  rm -rf "${TESTDIR}/site-pruned"
+  git -C "${SITE}" worktree prune
+  rm -rf "${TESTDIR}/site-listed"
+  run git -C "${SITE}" worktree list
+  assert_output --partial "${TESTDIR}/site-listed"
+  refute_output --partial "${TESTDIR}/site-pruned"
+  gone=$(grep -F -e site-pruned -e site-listed "${SITE}/.git/fire-worktrees" | cut -f1 | sort)
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+
+  ddev() {
+    if [[ $1 == delete ]]; then
+      echo "${*: -1}" >>"${TESTDIR}/deleted"
+    fi
+  }
+  export -f ddev docker
+  export TESTDIR
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-prune" --yes
+  assert_success
+  assert_line "Pruned."
+  run sort "${TESTDIR}/deleted"
+  assert_output "${gone}"
+
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "lost"
+}
+
+@test "start leaves out a moved worktree, whose environment prune keeps" {
+  git_worktree
+  git -C "${SITE}" worktree add -q -b feature/old "${TESTDIR}/site-old"
+  fw::start_worktree "${TESTDIR}/site-old" fresh false >/dev/null
+  # Its registry entry names the old path until it starts again.
+  git -C "${SITE}" worktree move "${TESTDIR}/site-old" "${TESTDIR}/site-moved"
+
+  run fw::start_worktree "${WT}" fresh false
+  assert_success
+  refute_output --partial "lost"
+  export -f ddev docker
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-prune" --yes
+  assert_success
+  assert_output "No DDEV projects to prune."
 }
 
 # git_worktree: a PHP site in Git with a linked worktree WT on feature/x, and

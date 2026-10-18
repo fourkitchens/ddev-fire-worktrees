@@ -29,33 +29,18 @@ fw::context "$PWD"
 registry=$(fw::registry_file)
 
 # Names of environments that still have a checkout.
-live=
-while IFS= read -r line; do
-  case $line in
-    'worktree '*)
-      path=${line#worktree }
-      if [[ -d "$path" ]]; then
-        live="$live$(fw::generated_name "$path")"$'\n'
-      fi
-      ;;
-  esac
-done < <(git -C "$FW_ROOT" worktree list --porcelain)
+live=$(fw::live_names)
 
+# Startup's notice counts the same entries.
 orphans=
 stale=
-if [[ -f "$registry" ]]; then
-  while IFS=$'\t' read -r name path; do
-    [[ -n "$name" ]] || continue
-    if printf '%s' "$live" | grep -qxF "$name"; then
-      continue
-    fi
-    if fw::has_environment "$name"; then
-      orphans="$orphans$name"$'\t'"$path"$'\n'
-    else
-      stale="$stale$name"$'\n'
-    fi
-  done <"$registry"
-fi
+while IFS=$'\t' read -r name path; do
+  if fw::has_environment "$name"; then
+    orphans="$orphans$name"$'\t'"$path"$'\n'
+  else
+    stale="$stale$name"$'\n'
+  fi
+done < <(fw::gone_entries)
 
 # Projects from the project-local commands this add-on replaced have no registry
 # entry, and neither do volumes that earlier versions of prune left behind. Their
