@@ -67,7 +67,10 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   can't find add-on services' volumes, such as Solr's, so prune also deletes every volume Docker
   Compose labelled with the project. It lists, but never deletes, older worktree projects and
   leftover volumes that match the prefix of the checkout you run it in or of your main checkout,
-  since another clone may own them.
+  since another clone may own them. Startup counts recorded worktrees whose checkout is gone and
+  prints a one-line notice naming `ddev fire-worktree-prune --yes`. It reads only the registry and
+  the filesystem, makes no Docker calls, and changes nothing, since a checkout on a drive that
+  isn't mounted looks gone too.
 * **Safety.** The commands refuse to run startup or refresh in the main checkout, to refresh a
   worktree before its first start, when DDEV would treat it as your main project, to overwrite a
   file at a generated file's path that they didn't write, or to remove a checkout with uncommitted

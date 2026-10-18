@@ -542,6 +542,57 @@ extra\.zz-feature-x-[0-9]+$'
   assert_output 1
 }
 
+@test "start points at prune when the registry lists environments whose checkout is gone, and keeps them" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
+  # Two worktrees an agent tool deleted without running anything, and one
+  # that's still there.
+  git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
+  printf 'mysite-gone-1\t%s\nmysite-gone-2\t%s\nmysite-kept-3\t%s\n' \
+    "${TESTDIR}/site-feature-gone-1" "${TESTDIR}/site-feature-gone-2" "${TESTDIR}/site-feature-kept" \
+    >"${SITE}/.git/fire-worktrees"
+
+  # Start without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_line "2 worktree environments have lost their checkout. To delete them, run: ddev fire-worktree-prune --yes"
+  run cut -f1 "${SITE}/.git/fire-worktrees"
+  assert_line mysite-gone-1
+  assert_line mysite-gone-2
+  assert_line mysite-kept-3
+
+  # A drive that's mounted again brings its checkout back.
+  mkdir "${TESTDIR}/site-feature-gone-2"
+  run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
+  assert_success
+  assert_line "1 worktree environment has lost its checkout. To delete it, run: ddev fire-worktree-prune --yes"
+}
+
+@test "start says nothing about prune when every recorded checkout is there" {
+  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+  git_site
+  WT="${TESTDIR}/site-feature-x"
+  git -C "${SITE}" worktree add -q -b feature/x "${WT}"
+  git -C "${SITE}" worktree add -q -b feature/kept "${TESTDIR}/site-feature-kept"
+  printf 'mysite-kept-3\t%s\n' "${TESTDIR}/site-feature-kept" >"${SITE}/.git/fire-worktrees"
+
+  # Run the command itself, which sets -e, without Docker or DDEV.
+  ddev() { :; }
+  docker() { :; }
+  export -f ddev docker
+  unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
+  cd "${WT}"
+  run "${DIR}/commands/host/fire-worktree-start" --db=fresh --no-build
+  assert_success
+  assert_output --partial "Worktree URLs:"
+  refute_output --partial "lost"
+  refute_output --partial "fire-worktree-prune"
+}
+
 # git_worktree: a PHP site in Git with a linked worktree WT on feature/x, and
 # ddev and docker stubbed out.
 git_worktree() {
