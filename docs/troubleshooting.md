@@ -25,7 +25,8 @@
 | `This worktree's database has no tables` | Startup kept a database that's empty, such as one `ddev start` created after `ddev fire-worktree-remove --keep-checkout`. Run `ddev fire-worktree-refresh` to copy one in. |
 | `has a label longer than 63 characters` | Shorten `WORKTREE_NAME_PREFIX` or the worktree's directory name. |
 | `Refusing to overwrite .ddev/config.worktree.local.yaml` | You or another tool wrote that file. Move its settings to `config.local.yaml` and delete it. |
-| `Refusing to remove ...; commit, stash or discard these changes first` | Commit, stash or delete the listed files, or use `--keep-checkout` to delete only the DDEV project. |
+| `Startup created untracked files that nothing ignores` | `ddev composer install` or the build wrote the listed files, and no `.gitignore` hides them, so `ddev fire-worktree-remove` refuses the worktree until they're gone. The site still started. If every checkout makes these files, list them in the project's `.gitignore`. |
+| `Refusing to remove ...; commit, stash or discard these changes first` | Commit, stash or delete the listed files, or use `--keep-checkout` to delete only the DDEV project. If they're Drupal scaffold files, such as `web/README.md`, in a worktree an earlier version started, run `ddev fire-worktree-start` first. See [Drupal notes](drupal.md#drupal-notes). |
 | `Pass --yes to confirm when not running interactively` | Add `--yes` when no one is at the terminal to answer the prompt. |
 | A worktree has old data | Its database was copied when it was created; `ddev fire-worktree-info` shows when. Run `ddev fire-worktree-refresh` in it for [a new copy](databases.md#when-the-database-is-copied). |
 | Search finds nothing in a new worktree | Its search server starts empty, but the copied database marks items as indexed. Run `ddev drush search-api:reset-tracker`, then `ddev drush search-api:index`. See [Search](drupal.md#search). |

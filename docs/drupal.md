@@ -133,6 +133,15 @@ in `.ddev/fire-worktree-start.log`.
   site on demand.
 * **Branch in the environment indicator.** In a worktree, `.git` is a file that points outside the
   container, so code that reads `../.git/HEAD` must skip the label when that path isn't readable.
+* **Scaffold files in `git status`.** Drupal's Composer scaffold writes files such as
+  `web/README.md`, and `.gitignore` files that hide them, but it writes the `.gitignore` files only
+  when it can run Git. In a worktree's web container it can't: Mutagen doesn't sync the worktree's
+  `.git` file, and without Mutagen that file points at a path in your main checkout that isn't
+  mounted. So after `ddev composer install`, startup copies each missing scaffold `.gitignore` from
+  your main checkout and prints `Copied <path> from the main checkout`. A worktree you haven't
+  edited then has a clean `git status`, and `ddev fire-worktree-remove` deletes it. To clean up a
+  worktree an earlier version left with untracked scaffold files, rerun `ddev fire-worktree-start`
+  in it.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
   worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead. Startup warns about
   `web_environment` values that name your main checkout's hostnames, such as
