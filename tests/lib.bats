@@ -821,7 +821,7 @@ drupal_site() {
   assert_output "https://mysite-feature-x.ddev.site/user/reset/1/1792195923/abc/login"
 }
 
-GIT_METADATA_ADVICE="reads Git metadata, which a worktree's container doesn't have, so Drupal prints PHP warnings on every page and Drush command. Skip that code when .git/HEAD isn't readable. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
+GIT_METADATA_ADVICE="reads Git metadata that a worktree's container can't read, so Drupal prints PHP warnings on every page and Drush command. In a worktree, .git is a file, so .git/HEAD can't be read. Get the branch from git branch --show-current instead, which works unless the worktree's Git mount is off, or skip that code when .git/HEAD isn't a readable file. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
 
 # assert_login_link_warns WARNING: in drupal_site, where ddev drush uli prints
 # what drush_uli_output prints and then a link, fw::login_link gives the link

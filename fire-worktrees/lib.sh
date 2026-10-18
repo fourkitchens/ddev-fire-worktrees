@@ -739,11 +739,12 @@ fw::login_link() {
 }
 
 # fw::check_git_metadata FILE...: warn when Drush's output in FILE shows Drupal
-# reading Git metadata, which a worktree's container doesn't have: a /.git/ path
-# or git's "not a git repository". Name the file and line from the first such
-# message that has one, in Drupal's "(line N of FILE)" form, FILE relative to the
-# docroot unless it's outside it, or PHP's "in FILE on line N" form, FILE a
-# container path. Name a container path relative to the project.
+# reading Git metadata that a worktree's container can't read: a /.git/ path,
+# which fails because .git is a file there, or git's "not a git repository",
+# which it prints when the Git mount is off. Name the file and line from the
+# first such message that has one, in Drupal's "(line N of FILE)" form, FILE
+# relative to the docroot unless it's outside it, or PHP's "in FILE on line N"
+# form, FILE a container path. Name a container path relative to the project.
 fw::check_git_metadata() {
   local docroot where
   docroot=$(fw::config_scalar "$FW_ROOT" docroot)
@@ -769,7 +770,7 @@ fw::check_git_metadata() {
       exit
     }
     END { exit !found }' "$@") || return 0
-  fw::warn "${where:-Drupal} reads Git metadata, which a worktree's container doesn't have, so Drupal prints PHP warnings on every page and Drush command. Skip that code when .git/HEAD isn't readable. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
+  fw::warn "${where:-Drupal} reads Git metadata that a worktree's container can't read, so Drupal prints PHP warnings on every page and Drush command. In a worktree, .git is a file, so .git/HEAD can't be read. Get the branch from git branch --show-current instead, which works unless the worktree's Git mount is off, or skip that code when .git/HEAD isn't a readable file. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
 }
 
 # fw::json TEXT: TEXT as a JSON string, or null when it's empty.

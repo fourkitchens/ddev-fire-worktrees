@@ -131,12 +131,24 @@ in `.ddev/fire-worktree-start.log`.
 * **Uploaded files.** Worktrees start without `sites/default/files`. Use
   [Stage File Proxy](https://www.drupal.org/project/stage_file_proxy) to fetch them from the remote
   site on demand.
-* **Branch in the environment indicator.** DDEV mounts your main checkout's `.git` directory into
-  the web container, but not a worktree's. In a worktree, `.git` is a file: Mutagen leaves it out
-  of the container, and without Mutagen it points to a path that exists only on the host. Code that
-  reads `../.git/HEAD` or runs `git` fails there, and with `display_errors` on, Drupal prints PHP
-  warnings on every page and Drush command. Skip that code when `.git/HEAD` isn't readable, so
-  worktrees show no branch:
+* **Branch in the environment indicator.** In a worktree, `.git` is a file that points to the
+  shared Git directory, not a directory, so code that reads `../.git/HEAD` fails there, and with
+  `display_errors` on, Drupal prints PHP warnings on every page and Drush command. `git` itself
+  works in a worktree's web container, because startup
+  [mounts the shared Git directory](how-it-works.md#git-in-the-web-container) there, so ask Git for
+  the branch instead:
+
+  ```php
+  $branch = trim((string) shell_exec('git -C ' . escapeshellarg($app_root) . ' branch --show-current 2>/dev/null'));
+  if ($branch !== '') {
+    $config['environment_indicator.indicator']['name'] = 'Local: ' . $branch;
+  }
+  ```
+
+  With the mount off (`WORKTREE_MOUNT_GIT=false`, or DDEV's global `no_bind_mounts`), the container
+  has no Git metadata, `git` prints nothing, and the worktree shows no branch. To keep reading
+  `.git/HEAD` instead, skip that code when `.git/HEAD` isn't a readable file, so worktrees show no
+  branch:
 
   ```php
   $git_head = $app_root . '/../.git/HEAD';
@@ -147,16 +159,16 @@ in `.ddev/fire-worktree-start.log`.
   ```
 
   Use `$app_root`, which settings always have, rather than `DRUPAL_ROOT`. Startup, refresh and
-  `info` warn that a file `reads Git metadata, which a worktree's container doesn't have` when
-  Drush's output shows the problem, and name the file and line when they can.
+  `info` warn that a file `reads Git metadata that a worktree's container can't read` when Drush's
+  output shows the problem, and name the file and line when they can.
 * **Scaffold files in `git status`.** Drupal's Composer scaffold writes files such as
   `web/README.md`, and `.gitignore` files that hide them, but it writes the `.gitignore` files only
-  when it can run Git, which it can't in a worktree's web container, for the reason above. So after
-  `ddev composer install`, startup copies each missing scaffold `.gitignore` from your main
-  checkout and prints `Copied <path> from the main checkout`. A worktree you haven't
-  edited then has a clean `git status`, and `ddev fire-worktree-remove` deletes it. To clean up a
-  worktree an earlier version left with untracked scaffold files, rerun `ddev fire-worktree-start`
-  in it.
+  when it can run Git. In a worktree's web container it can, through the Git mount, unless the mount
+  is off. For that case, after `ddev composer install`, startup copies each missing scaffold
+  `.gitignore` from your main checkout and prints `Copied <path> from the main checkout`. A
+  worktree you haven't edited then has a clean `git status`, and `ddev fire-worktree-remove`
+  deletes it. To clean up a worktree an earlier version left with untracked scaffold files, rerun
+  `ddev fire-worktree-start` in it.
 * **Hard-coded URLs.** Settings or Drush aliases that name `https://<project>.ddev.site` point a
   worktree at your main checkout. Use `DDEV_PRIMARY_URL` instead. Startup warns about
   `web_environment` values that name your main checkout's hostnames, such as
