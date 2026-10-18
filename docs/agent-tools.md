@@ -203,3 +203,26 @@ default), it deletes older ones without running anything. Rely on startup's noti
 
 Cursor doesn't document whether setup finishes before the agent starts, so the agent may start
 before the site is running. To check on setup, open the Output panel and select "Worktrees Setup".
+
+## Superset
+
+For [Superset](https://superset.sh), add this to the project's `.superset/config.json`:
+
+```json
+{
+  "setup": [
+    "if [ -x .ddev/commands/host/fire-worktree-start ]; then ddev fire-worktree-start; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-start\"; fi"
+  ],
+  "teardown": [
+    "if [ -x .ddev/commands/host/fire-worktree-remove ]; then ddev fire-worktree-remove --keep-checkout --yes; else \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.ddev/commands/host/fire-worktree-remove\" --keep-checkout --yes; fi || true"
+  ]
+}
+```
+
+Superset reads the main checkout's `.superset/config.json`, which a worktree's own copy can
+override, so a worktree on a branch older than the file still runs setup.
+
+By default the agent starts alongside setup. To keep it waiting until startup finishes, each person
+turns on Settings → Experimental → "Wait for workspace setup before starting agents".
+
+Superset runs teardown with no visible terminal and stops it after 60 seconds.

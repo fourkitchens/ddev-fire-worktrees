@@ -132,6 +132,8 @@ tool_line() {
     Conductor:setup) section Conductor | toml_key setup | unquote toml-literal ;;
     Conductor:teardown) section Conductor | toml_key archive | unquote toml-literal ;;
     Cursor:setup) section Cursor | json_array setup-worktree | unquote json ;;
+    Superset:setup) section Superset | json_array setup | unquote json ;;
+    Superset:teardown) section Superset | json_array teardown | unquote json ;;
     *)
       echo "tool_line has no case for the ${2} line in the ${1} section" >&2
       return 1
