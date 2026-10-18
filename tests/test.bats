@@ -126,8 +126,8 @@ worktree_name() {
   assert_file_exists "${WT}/web/sites/default/settings.local.php"
   run grep -c "Building with: " "${WT}/.ddev/fire-worktree-start.log"
   assert_output "1"
-  # DDEV doesn't list the generated config as custom configuration.
-  run grep -c "Config: .*/config\.worktree\.local\.yaml" "${WT}/.ddev/fire-worktree-start.log"
+  # DDEV doesn't list the generated config or the Git mount's Compose file as custom configuration.
+  run grep -c -e "Config: .*/config\.worktree\.local\.yaml" -e "^ *- .*/docker-compose\.fire-worktree-git\.yaml" "${WT}/.ddev/fire-worktree-start.log"
   assert_output "0"
   run git status --porcelain
   assert_output ""

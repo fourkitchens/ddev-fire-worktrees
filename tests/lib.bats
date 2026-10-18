@@ -359,7 +359,7 @@ YAML
 extra\.zz-feature-x-[0-9]+$'
 }
 
-@test "DDEV doesn't list the generated config as custom configuration" {
+@test "DDEV doesn't list the generated config or the Git mount's Compose file as custom configuration" {
   printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
   git_site
   git -C "${SITE}" worktree add -q -b feature/x "${TESTDIR}/site-feature-x"
@@ -370,9 +370,12 @@ extra\.zz-feature-x-[0-9]+$'
   unset WORKTREE_SOURCE_ROOT T3CODE_PROJECT_ROOT
   run fw::start_worktree "${TESTDIR}/site-feature-x" fresh false
   assert_success
-  run sed -n 2p "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}"
-  assert_output '#ddev-silent-no-warn'
-  fw::is_generated "${TESTDIR}/site-feature-x/.ddev/${FW_CONFIG_NAME}"
+  local f
+  for f in "${FW_CONFIG_NAME}" "${FW_GIT_COMPOSE_NAME}"; do
+    run sed -n 2p "${TESTDIR}/site-feature-x/.ddev/${f}"
+    assert_output '#ddev-silent-no-warn'
+    fw::is_generated "${TESTDIR}/site-feature-x/.ddev/${f}"
+  done
 }
 
 @test "start skips WORKTREE_COPY_FILES paths outside the project" {
@@ -565,6 +568,7 @@ git_worktree() {
   assert_output "$(
     cat <<YAML
 ${FW_MARKER}
+#ddev-silent-no-warn
 services:
   web:
     volumes:

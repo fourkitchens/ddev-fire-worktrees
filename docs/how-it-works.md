@@ -84,7 +84,9 @@ at all, because DDEV's Mutagen config ignores it. So startup adds its own Git mo
 with and without Mutagen. Every `fire-worktree-start` writes two files in the worktree's `.ddev`:
 
 * `docker-compose.fire-worktree-git.yaml` mounts the shared Git directory read-only at
-  `/mnt/fire-worktrees/git`, and the next file read-only over `/var/www/html/.git`.
+  `/mnt/fire-worktrees/git`, and the next file read-only over `/var/www/html/.git`. Like
+  `config.worktree.local.yaml`, it has a `#ddev-silent-no-warn` line, so DDEV leaves it out of
+  the custom configuration it lists on every start.
 * `fire-worktree-git` holds `gitdir: /mnt/fire-worktrees/git/worktrees/<id>`, where `<id>` names
   the worktree's metadata directory. Git takes everything after `gitdir: ` as the path, so this file
   can't carry the "generated" comment the other files start with. The mount path marks it instead.
