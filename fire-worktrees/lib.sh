@@ -715,22 +715,18 @@ fw::error_line() {
 # Without a link, it prints the first line of Drush's error instead, and fails.
 # Either way, it warns when Drush's output shows Drupal reading Git metadata.
 fw::login_link() {
-  local link out err status=0
-  out=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || return 1
-  err=$(mktemp "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || {
-    rm -f "$out"
-    return 1
-  }
-  ddev drush uli --no-browser --uri="$1" >"$out" 2>"$err" || true
-  fw::check_git_metadata "$out" "$err"
-  link=$(grep -oE 'https?://[^[:space:]<>"]+' "$out" | tail -n 1) || true
+  local link tmp status=0
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/fire-worktree-uli.XXXXXX") || return 1
+  ddev drush uli --no-browser --uri="$1" >"$tmp/out" 2>"$tmp/err" || true
+  fw::check_git_metadata "$tmp/out" "$tmp/err"
+  link=$(grep -oE 'https?://[^[:space:]<>"]+' "$tmp/out" | tail -n 1) || true
   if [[ -n "$link" ]]; then
     printf '%s' "$link"
   else
-    fw::error_line "$err"
+    fw::error_line "$tmp/err"
     status=1
   fi
-  rm -f "$out" "$err"
+  rm -rf "$tmp"
   return "$status"
 }
 
@@ -738,13 +734,13 @@ fw::login_link() {
 # reading Git metadata, which a worktree's container doesn't have: a /.git/ path
 # or git's "not a git repository". Name the file and line from the first such
 # message that has one, in Drupal's "(line N of FILE)" form, FILE relative to the
-# docroot, or PHP's "in FILE on line N" form, FILE a container path.
+# docroot unless it's outside it, or PHP's "in FILE on line N" form, FILE a
+# container path. Name a container path relative to the project.
 fw::check_git_metadata() {
-  local docroot='' where
-  if [[ -n "${FW_ROOT:-}" ]]; then
-    docroot=$(fw::config_scalar "$FW_ROOT" docroot)
-  fi
-  where=$(awk -v docroot="${docroot:+$docroot/}" '
+  local docroot where
+  docroot=$(fw::config_scalar "$FW_ROOT" docroot)
+  # DDEV mounts the project at /var/www/html in the web container.
+  where=$(awk -v docroot="${docroot:+$docroot/}" -v project=/var/www/html/ '
     { sub(/\r$/, "") }
     /\/\.git\/|not a git repository/ {
       found = 1
@@ -754,16 +750,15 @@ fw::check_git_metadata() {
         s = substr(line, RSTART + 6, RLENGTH - 7)
         n = s; sub(/ of .*/, "", n)
         f = s; sub(/^[0-9]+ of /, "", f)
-        print docroot f " line " n
-        exit
-      }
-      if (match(line, / in \/[^ ]+ on line [0-9]+/)) {
+        if (f !~ /^\//) f = docroot f
+      } else if (match(line, / in \/[^ ]+ on line [0-9]+/)) {
         s = substr(line, RSTART + 4, RLENGTH - 4)
-        f = s; sub(/ on line .*/, "", f); sub(/^\/var\/www\/html\//, "", f)
+        f = s; sub(/ on line .*/, "", f)
         n = s; sub(/.* on line /, "", n)
-        print f " line " n
-        exit
-      }
+      } else next
+      if (index(f, project) == 1) f = substr(f, length(project) + 1)
+      print f " line " n
+      exit
     }
     END { exit !found }' "$@") || return 0
   fw::warn "${where:-Drupal} reads Git metadata, which a worktree's container doesn't have, so Drupal prints PHP warnings on every page and Drush command. Skip that code when .git/HEAD isn't readable. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"

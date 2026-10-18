@@ -591,7 +591,15 @@ YAML
   assert_output ""
 }
 
+# drupal_site: make SITE a Drupal project with docroot web, the project
+# fw::login_link runs in.
+drupal_site() {
+  printf 'name: mysite\ntype: drupal11\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
+  FW_ROOT="${SITE}"
+}
+
 @test "finds the login link after a warning Drupal prints on the same line" {
+  drupal_site
   # A warning from settings.php reaches stdout as HTML with no newline at the
   # end, so the link drush prints starts on its last line. The warning can name
   # a URL of its own, and the lines can end in CRLF.
@@ -606,99 +614,75 @@ YAML
   assert_output "https://mysite-feature-x.ddev.site/user/reset/1/1792195923/abc/login"
 }
 
-# git_metadata_site: a site with docroot web, the project fw::login_link runs in.
-git_metadata_site() {
-  printf 'name: mysite\ntype: drupal11\ndocroot: web\n' >"${SITE}/.ddev/config.yaml"
-  FW_ROOT="${SITE}"
-}
-
 GIT_METADATA_ADVICE="reads Git metadata, which a worktree's container doesn't have, so Drupal prints PHP warnings on every page and Drush command. Skip that code when .git/HEAD isn't readable. See https://github.com/fourkitchens/ddev-fire-worktrees/blob/main/docs/drupal.md#drupal-notes"
 
-@test "warns once, naming the settings line, when Drupal's warnings show it reading Git metadata" {
-  git_metadata_site
-  # What ddev drush uli printed to stdout in a worktree whose settings.php
-  # reads ../.git/HEAD, then the link.
+# assert_login_link_warns WARNING: in drupal_site, where ddev drush uli prints
+# what drush_uli_output prints and then a link, fw::login_link gives the link
+# and prints WARNING to stderr, or nothing when WARNING is empty.
+assert_login_link_warns() {
+  drupal_site
   ddev() {
-    cat "${DIR}/tests/testdata/drush-uli-git-head-html.txt"
+    drush_uli_output
     echo "${4#--uri=}/user/reset/1/abc/def/login"
   }
   run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
   assert_success
   assert_output "https://mysite-feature-x.ddev.site/user/reset/1/abc/def/login"
-  assert_equal "$stderr" "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
+  assert_equal "$stderr" "$1"
+}
+
+@test "warns once, naming the settings line, when Drupal's warnings show it reading Git metadata" {
+  # What ddev drush uli printed to stdout in a worktree whose settings.php
+  # reads ../.git/HEAD.
+  drush_uli_output() { cat "${DIR}/tests/testdata/drush-uli-git-head-html.txt"; }
+  assert_login_link_warns "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
+}
+
+@test "names the line of a file outside the docroot that Drupal's warning shows reading Git metadata" {
+  # Drupal names a file under the docroot relative to it, and any other by its
+  # container path.
+  drush_uli_output() {
+    printf '%s\n' '<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file(/var/www/html/.git/HEAD): Failed to open stream: No such file or directory in <em class="placeholder">include()</em> (line <em class="placeholder">4</em> of <em class="placeholder">/var/www/html/config/git.php</em>).</summary><pre class="backtrace">include() (Line: 4)</pre></details>'
+  }
+  assert_login_link_warns "Warning: config/git.php line 4 ${GIT_METADATA_ADVICE}"
 }
 
 @test "names the settings line from PHP's own warning, without the container's project root" {
-  git_metadata_site
-  ddev() {
-    cat "${DIR}/tests/testdata/drush-uli-git-head-php.txt" >&2
-    echo "${4#--uri=}/user/reset/1/abc/def/login"
-  }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/abc/def/login"
-  assert_equal "$stderr" "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
+  drush_uli_output() { cat "${DIR}/tests/testdata/drush-uli-git-head-php.txt" >&2; }
+  assert_login_link_warns "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
 }
 
 @test "warns generically when settings run git and the container says it's not a repository" {
-  git_metadata_site
-  ddev() {
-    cat "${DIR}/tests/testdata/drush-uli-not-a-git-repository.txt" >&2
-    echo "${4#--uri=}/user/reset/1/abc/def/login"
-  }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/abc/def/login"
-  assert_equal "$stderr" "Warning: Drupal ${GIT_METADATA_ADVICE}"
+  drush_uli_output() { cat "${DIR}/tests/testdata/drush-uli-not-a-git-repository.txt" >&2; }
+  assert_login_link_warns "Warning: Drupal ${GIT_METADATA_ADVICE}"
 }
 
 @test "warns generically about any Git metadata path that comes without a file and line" {
-  git_metadata_site
-  ddev() {
-    echo 'file_get_contents(/var/www/html/.git/refs/heads/main): Failed to open stream: No such file or directory'
-    echo "${4#--uri=}/user/reset/1/abc/def/login"
-  }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/abc/def/login"
-  assert_equal "$stderr" "Warning: Drupal ${GIT_METADATA_ADVICE}"
+  drush_uli_output() { echo 'file_get_contents(/var/www/html/.git/refs/heads/main): Failed to open stream: No such file or directory'; }
+  assert_login_link_warns "Warning: Drupal ${GIT_METADATA_ADVICE}"
 }
 
 @test "warns once however many times Drush's output shows Git metadata" {
-  git_metadata_site
-  ddev() {
+  drush_uli_output() {
     cat "${DIR}/tests/testdata/drush-uli-git-head-html.txt" "${DIR}/tests/testdata/drush-uli-git-head-html.txt"
     cat "${DIR}/tests/testdata/drush-uli-git-head-php.txt" "${DIR}/tests/testdata/drush-uli-not-a-git-repository.txt" >&2
-    echo "${4#--uri=}/user/reset/1/abc/def/login"
   }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_equal "$stderr" "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
+  assert_login_link_warns "Warning: web/sites/default/settings.php line 137 ${GIT_METADATA_ADVICE}"
 }
 
 @test "doesn't warn about Git metadata when Drush's output doesn't show it" {
-  git_metadata_site
-  ddev() {
-    echo "${4#--uri=}/user/reset/1/abc/def/login"
-  }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_equal "$stderr" ""
+  drush_uli_output() { :; }
+  assert_login_link_warns ""
 
   # A warning about something else.
-  ddev() {
-    printf '%s\n%s\n' \
-      '<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file_get_contents(https://example.com/branch.txt): Failed to open stream in <em class="placeholder">include()</em> (line <em class="placeholder">5</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 5)</pre></details>' \
-      "${4#--uri=}/user/reset/1/abc/def/login"
+  drush_uli_output() {
+    printf '%s\n' '<details class="error-with-backtrace"><summary><em class="placeholder">Warning</em>: file_get_contents(https://example.com/branch.txt): Failed to open stream in <em class="placeholder">include()</em> (line <em class="placeholder">5</em> of <em class="placeholder">sites/default/settings.php</em>).</summary><pre class="backtrace">include() (Line: 5)</pre></details>'
   }
-  run --separate-stderr fw::login_link https://mysite-feature-x.ddev.site
-  assert_success
-  assert_output "https://mysite-feature-x.ddev.site/user/reset/1/abc/def/login"
-  assert_equal "$stderr" ""
+  assert_login_link_warns ""
 }
 
 @test "warns about Git metadata when Drush fails too, and still says why there's no link" {
-  git_metadata_site
+  drupal_site
   ddev() {
     cat "${DIR}/tests/testdata/drush-uli-git-head-html.txt"
     cat "${DIR}/tests/testdata/drush-uli-without-users-table.txt" >&2
