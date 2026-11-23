@@ -1,32 +1,44 @@
 #!/usr/bin/env bash
 #ddev-generated
 
-## Description: Show this worktree's DDEV project, URLs, database source and age, and a one-time login link
-## Usage: fire-worktree-info [--json]
-## Example: ddev fire-worktree-info\nddev fire-worktree-info --json
-## Flags: [{"Name":"json","Usage":"Print JSON, for scripts and agents"}]
+## Description: Show this worktree's DDEV project, URLs, database source and age, and a one-time login link, and its Drupal Domain module domains
+## Usage: fire-worktree-info [--json] [--domain=<machine name|hostname>]
+## Example: ddev fire-worktree-info\nddev fire-worktree-info --json\nddev fire-worktree-info --domain=news
+## Flags: [{"Name":"json","Usage":"Print JSON, for scripts and agents"},{"Name":"domain","Type":"string","Usage":"Make the login link for this Drupal Domain module domain, by machine name or hostname, rather than the default domain"}]
 
 set -euo pipefail
 
 # shellcheck source=fire-worktrees/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../fire-worktrees/lib.sh"
 
-usage='Usage: ddev fire-worktree-info [--json]'
+usage='Usage: ddev fire-worktree-info [--json] [--domain=<machine name|hostname>]'
 json=false
-case ${1:-} in
-  '') ;;
-  # DDEV's global -j/--json-output reaches the command too.
-  --json | -j | --json-output) json=true ;;
-  -h | --help)
-    echo "$usage"
-    echo 'Shows the DDEV project, status and URLs of the worktree you are in, and where and'
-    echo 'when its database was copied. For a running Drupal site, it also creates a one-time'
-    echo 'login link.'
-    exit 0
-    ;;
-  *) fw::die "$usage" ;;
-esac
-[[ $# -le 1 ]] || fw::die "$usage"
+domain=
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    # DDEV's global -j/--json-output reaches the command too.
+    --json | -j | --json-output) json=true ;;
+    --domain=?*) domain=${1#--domain=} ;;
+    --domain)
+      [[ $# -ge 2 && -n "$2" ]] || fw::die "$usage"
+      domain=$2
+      shift
+      ;;
+    -h | --help)
+      echo "$usage"
+      echo 'Shows the DDEV project, status and URLs of the worktree you are in, and where and'
+      echo 'when its database was copied. For a running Drupal site, it also creates a one-time'
+      echo 'login link.'
+      echo
+      echo 'With the Drupal Domain module, it lists the active domains as Drupal resolves them'
+      echo 'in the worktree. Drupal sessions are per hostname, and using a one-time link'
+      echo 'invalidates the others, so --domain makes a fresh link for one domain at a time.'
+      exit 0
+      ;;
+    *) fw::die "$usage" ;;
+  esac
+  shift
+done
 
 # Use the caller's directory rather than DDEV_APPROOT, which points at the
 # primary project when this worktree is nested inside it.
@@ -51,13 +63,62 @@ if [[ "$status" != 'not started' ]]; then
   created_utc=$(fw::db_created -u +%Y-%m-%dT%H:%M:%SZ)
 fi
 
-login=
+drupal_running=false
 if fw::is_drupal "$FW_ROOT" && [[ "$status" == running ]]; then
-  if ! login=$(fw::login_link "$url"); then
-    fw::login_failed "$url" "$login"
+  drupal_running=true
+fi
+
+# The Domain module's domains, from Drupal rather than additional_hostnames, since
+# settings overrides and aliases decide which hostname each one answers on.
+domains=
+if [[ "$drupal_running" == true ]] && fw::has_domain_module "$FW_ROOT"; then
+  if ! domains=$(fw::domains "$url"); then
+    message="Couldn't list the Drupal Domain module's domains${domains:+: $domains}"
+    [[ -z "$domain" ]] || fw::die "$message."
+    fw::warn "$message. Try: ddev drush domain:list"
+    domains=
+  fi
+fi
+
+# The domain the login link is for: the one --domain names, else the default.
+login_id='' login_url=$url
+if [[ -n "$domain" ]]; then
+  if ! fw::is_drupal "$FW_ROOT"; then
+    fw::die '--domain works only for a Drupal site with the Domain module.'
+  elif [[ "$drupal_running" == false ]]; then
+    fw::die '--domain needs the project running. Start it with ddev start, then rerun this command.'
+  elif [[ -z "$domains" ]]; then
+    fw::die "--domain needs the Drupal Domain module, and this site has no active domains."
+  fi
+  if ! match=$(fw::find_domain "$domains" "$domain"); then
+    fw::die "$(printf 'No active domain has the machine name or hostname %s. Use one of:\n%s' "$domain" \
+      "$(printf '%s\n' "$domains" | awk -F '\t' '
+        { id[NR] = $1; u[NR] = $3; if (length($1) > w) w = length($1) }
+        END { for (i = 1; i <= NR; i++) printf "  %-" w "s  %s\n", id[i], u[i] }')")"
+  fi
+else
+  match=$(printf '%s\n' "$domains" | awk -F '\t' '$2 == 1 { print; exit }')
+fi
+if [[ -n "$match" ]]; then
+  IFS=$'\t' read -r login_id _ login_url _ <<<"$match"
+fi
+
+login=
+if [[ "$drupal_running" == true ]]; then
+  if ! login=$(fw::login_link "$login_url"); then
+    fw::login_failed "$login_url" "$login"
     login=
   fi
 fi
+
+# login_command ID DEFAULT: the command that prints a login link for a domain.
+login_command() {
+  if [[ "$2" == 1 || "$2" == true ]]; then
+    printf 'ddev fire-worktree-info'
+  else
+    printf 'ddev fire-worktree-info --domain=%s' "$1"
+  fi
+}
 
 if [[ "$json" == true ]]; then
   printf '{\n  "name": %s,\n  "status": %s,\n  "urls": [' "$(fw::json "$name")" "$(fw::json "$status")"
@@ -68,7 +129,19 @@ if [[ "$json" == true ]]; then
   done <<<"$urls"
   printf '],\n  "database": {"source": %s, "file": %s, "created": %s},\n' "$(fw::json "$db_source")" "$(fw::json "$db_file")" \
     "$(fw::json "$created_utc")"
-  printf '  "login_url": %s\n}\n' "$(fw::json "$login")"
+  printf '  "login_url": %s' "$(fw::json "$login")"
+  if [[ -n "$domains" ]]; then
+    printf ',\n  "domains": ['
+    sep=
+    while IFS=$'\t' read -r id is_default d_url d_label; do
+      [[ "$is_default" == 1 ]] && is_default=true || is_default=false
+      printf '%s\n    {"id": %s, "label": %s, "url": %s, "default": %s, "login_command": %s}' "$sep" "$(fw::json "$id")" \
+        "$(fw::json "$d_label")" "$(fw::json "$d_url")" "$is_default" "$(fw::json "$(login_command "$id" "$is_default")")"
+      sep=,
+    done <<<"$domains"
+    printf '\n  ]'
+  fi
+  printf '\n}\n'
   exit 0
 fi
 
@@ -94,4 +167,25 @@ if [[ -n "$login" ]]; then
   printf 'Login:     %s\n' "$login"
 elif fw::is_drupal "$FW_ROOT" && [[ "$status" == stopped ]]; then
   printf 'Login:     start the project with ddev start, then rerun this command\n'
+fi
+if [[ -n "$domains" ]]; then
+  # Pad by characters, which printf's widths don't do for non-ASCII labels.
+  label_width=0 url_width=0
+  while IFS=$'\t' read -r id is_default d_url d_label; do
+    [[ ${#d_label} -le $label_width ]] || label_width=${#d_label}
+    [[ ${#d_url} -le $url_width ]] || url_width=${#d_url}
+  done <<<"$domains"
+  label=Domains:
+  while IFS=$'\t' read -r id is_default d_url d_label; do
+    if [[ "$id" == "$login_id" && -n "$login" ]]; then
+      note='(Login above)'
+      [[ "$is_default" != 1 ]] || note='(default)'
+    else
+      note=$(login_command "$id" "$is_default")
+      [[ "$is_default" != 1 ]] || note="(default) $note"
+    fi
+    printf '%-10s %s%*s  %s%*s  %s\n' "$label" "$d_label" $((label_width - ${#d_label})) '' "$d_url" \
+      $((url_width - ${#d_url})) '' "$note"
+    label=
+  done <<<"$domains"
 fi

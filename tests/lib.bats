@@ -1191,7 +1191,7 @@ drupal_worktree() {
   assert_output "$(printf '{\n  "name": "%s",\n  "status": "running",\n  "urls": ["https://%s.ddev.site", "https://news.%s.ddev.site"],\n  "database": {"source": "fresh", "file": null, "created": "2026-10-01T14:30:00Z"},\n  "login_url": "https://%s.ddev.site/user/reset/1/abc/def/login"\n}' "${NAME}" "${NAME}" "${NAME}" "${NAME}")"
   run "${INFO}" --bogus
   assert_failure
-  assert_output "Usage: ddev fire-worktree-info [--json]"
+  assert_output "Usage: ddev fire-worktree-info [--json] [--domain=<machine name|hostname>]"
 }
 
 # started_worktree: drupal_worktree after its first start, with stand-ins from
@@ -1296,6 +1296,191 @@ with_database() {
   run "${INFO}"
   assert_line "${retry}"
   refute_output --partial "To populate"
+}
+
+# domain_worktree: started_worktree, running, with the Domain module in its
+# Composer files. drush php:eval prints DOMAINS_OUT, Drupal's active domains:
+# the default first, after an HTML warning with no newline, then news and shop.
+# ddev logs each call's first three arguments, not the PHP, to DDEV_LOG.
+domain_worktree() {
+  started_worktree
+  echo '{"require": {"drupal/domain": "^2.0"}}' >"${WT}/composer.json"
+  DOMAINS_OUT=$(printf '<br /><b>Warning</b>: something in settings.php<br />fire-worktree-domain\tmain\t1\thttps://%s.ddev.site\tMain\nfire-worktree-domain\tnews\t0\thttps://news.%s.ddev.site\tNews room\nfire-worktree-domain\tshop\t0\thttps://shop.%s.ddev.site\tShop' "${NAME}" "${NAME}" "${NAME}")
+  ddev() {
+    echo "${*:1:3}" >>"${DDEV_LOG}"
+    case "$1 $2" in
+      'drush uli') echo "${4#--uri=}/user/reset/1/abc/def/login" ;;
+      'drush php:eval') printf '%s\n' "${DOMAINS_OUT}" ;;
+    esac
+  }
+  docker() {
+    case $1 in
+      ps) echo "ddev-${NAME}-web" ;;
+      volume) echo "${NAME}-mariadb" ;;
+    esac
+  }
+  export -f ddev docker
+  export DOMAINS_OUT
+  INFO="${DIR}/commands/host/fire-worktree-info"
+  MAIN="https://${NAME}.ddev.site"
+  NEWS="https://news.${NAME}.ddev.site"
+  SHOP="https://shop.${NAME}.ddev.site"
+  cd "${WT}"
+}
+
+@test "fire-worktree-info lists the Domain module's domains with one Drush call and logs in on the default" {
+  domain_worktree
+  run "${INFO}"
+  assert_success
+  w=${#NEWS}
+  assert_output --partial "$(printf 'Login:     %s/user/reset/1/abc/def/login\nDomains:   Main       %-*s  (default)\n           News room  %-*s  ddev fire-worktree-info --domain=news\n           Shop       %-*s  ddev fire-worktree-info --domain=shop' \
+    "${MAIN}" "$w" "${MAIN}" "$w" "${NEWS}" "$w" "${SHOP}")"
+  run cat "${DDEV_LOG}"
+  assert_output "$(printf 'drush php:eval --uri=%s\ndrush uli --no-browser' "${MAIN}")"
+
+  run "${INFO}" --json
+  assert_success
+  assert_output --partial "$(printf '  "login_url": "%s/user/reset/1/abc/def/login",\n  "domains": [\n    {"id": "main", "label": "Main", "url": "%s", "default": true, "login_command": "ddev fire-worktree-info"},\n    {"id": "news", "label": "News room", "url": "%s", "default": false, "login_command": "ddev fire-worktree-info --domain=news"},\n    {"id": "shop", "label": "Shop", "url": "%s", "default": false, "login_command": "ddev fire-worktree-info --domain=shop"}\n  ]\n}' \
+    "${MAIN}" "${MAIN}" "${NEWS}" "${SHOP}")"
+
+  # The login link goes to the default domain's URL, wherever Drupal serves it.
+  DOMAINS_OUT=$(printf 'fire-worktree-domain\tnews\t0\t%s\tNews\nfire-worktree-domain\twww\t1\thttps://www.%s.ddev.site\tMain' "${NEWS}" "${NAME}")
+  run "${INFO}"
+  assert_success
+  assert_line "Login:     https://www.${NAME}.ddev.site/user/reset/1/abc/def/login"
+}
+
+@test "fire-worktree-info --domain makes the login link for one domain, by machine name, hostname or URL" {
+  domain_worktree
+  for arg in --domain=news "--domain=news.${NAME}.ddev.site" "--domain=NEWS.${NAME}.DDEV.SITE" "--domain=${NEWS}/" --domain; do
+    if [[ "${arg}" == --domain ]]; then
+      run "${INFO}" --domain news
+    else
+      run "${INFO}" "${arg}"
+    fi
+    assert_success
+    assert_line "Login:     ${NEWS}/user/reset/1/abc/def/login"
+    assert_line --regexp '^Domains:   Main .*  \(default\) ddev fire-worktree-info$'
+    assert_line --regexp "^           News room +${NEWS//./\\.} +\(Login above\)$"
+  done
+  # One link, for that domain only.
+  run grep -c 'drush uli' "${DDEV_LOG}"
+  assert_output 5
+
+  run "${INFO}" --json --domain=shop
+  assert_success
+  assert_line "  \"login_url\": \"${SHOP}/user/reset/1/abc/def/login\","
+
+  # The default domain by name gets the same link as no flag.
+  run "${INFO}" --domain=main
+  assert_success
+  assert_line "Login:     ${MAIN}/user/reset/1/abc/def/login"
+
+  run "${INFO}" --domain=blog
+  assert_failure
+  assert_output "$(printf 'No active domain has the machine name or hostname blog. Use one of:\n  main  %s\n  news  %s\n  shop  %s' "${MAIN}" "${NEWS}" "${SHOP}")"
+  run "${INFO}" --domain=
+  assert_failure
+  assert_output "Usage: ddev fire-worktree-info [--json] [--domain=<machine name|hostname>]"
+  run "${INFO}" --domain
+  assert_failure
+  assert_output --partial "Usage: ddev fire-worktree-info [--json] [--domain=<machine name|hostname>]"
+}
+
+@test "fire-worktree-info output is unchanged without the Domain module, with the project stopped, or for a non-Drupal project" {
+  domain_worktree
+  expected=$(printf 'Login:     %s/user/reset/1/abc/def/login' "${MAIN}")
+
+  # The module is enabled in Drupal but not in Composer's files: no Drush call.
+  rm "${WT}/composer.json"
+  : >"${DDEV_LOG}"
+  run "${INFO}"
+  assert_success
+  assert_line "${expected}"
+  refute_output --partial "Domains:"
+  run grep -c 'php:eval' "${DDEV_LOG}"
+  assert_output 0
+  run "${INFO}" --json
+  refute_output --partial '"domains"'
+  assert_line --index 5 "  \"login_url\": \"${MAIN}/user/reset/1/abc/def/login\""
+  assert_line --index 6 "}"
+  run "${INFO}" --domain=news
+  assert_failure
+  assert_output "--domain needs the Drupal Domain module, and this site has no active domains."
+
+  # In Composer's files but not enabled in Drupal: the PHP prints nothing.
+  echo '{"require": {"drupal/domain": "^2.0"}}' >"${WT}/composer.json"
+  DOMAINS_OUT=''
+  run "${INFO}"
+  assert_success
+  assert_line "${expected}"
+  refute_output --partial "Domains:"
+  run "${INFO}" --json
+  refute_output --partial '"domains"'
+
+  # A stopped project.
+  DOMAINS_OUT=$(printf 'fire-worktree-domain\tnews\t1\t%s\tNews' "${NEWS}")
+  docker() { [[ "$1" != volume ]] || echo "${NAME}-mariadb"; }
+  export -f docker
+  : >"${DDEV_LOG}"
+  run "${INFO}"
+  assert_success
+  assert_line 'Login:     start the project with ddev start, then rerun this command'
+  refute_output --partial "Domains:"
+  run cat "${DDEV_LOG}"
+  assert_output ""
+  run "${INFO}" --domain=news
+  assert_failure
+  assert_output "--domain needs the project running. Start it with ddev start, then rerun this command."
+
+  # A running project that isn't Drupal.
+  docker() {
+    case $1 in
+      ps) echo "ddev-${NAME}-web" ;;
+      volume) echo "${NAME}-mariadb" ;;
+    esac
+  }
+  export -f docker
+  sed -i.bak 's/^type: drupal11$/type: php/' "${WT}/.ddev/config.yaml"
+  run "${INFO}"
+  assert_success
+  refute_output --partial "Login:"
+  refute_output --partial "Domains:"
+  run cat "${DDEV_LOG}"
+  assert_output ""
+  run "${INFO}" --domain=news
+  assert_failure
+  assert_output "--domain works only for a Drupal site with the Domain module."
+}
+
+@test "a Drush error while listing domains warns, and the rest of fire-worktree-info still prints" {
+  domain_worktree
+  ddev() {
+    echo "${*:1:3}" >>"${DDEV_LOG}"
+    case "$1 $2" in
+      'drush uli') echo "${4#--uri=}/user/reset/1/abc/def/login" ;;
+      'drush php:eval')
+        printf ' [error]  Drush command terminated abnormally.\n' >&2
+        return 1
+        ;;
+    esac
+  }
+  export -f ddev
+  warning="Warning: Couldn't list the Drupal Domain module's domains: Drush command terminated abnormally. Try: ddev drush domain:list"
+  run "${INFO}"
+  assert_success
+  assert_line "${warning}"
+  assert_line --partial "Project:   ${NAME} (running)"
+  assert_line "Login:     ${MAIN}/user/reset/1/abc/def/login"
+  refute_output --partial "Domains:"
+  run "${INFO}" --json
+  assert_success
+  assert_line "${warning}"
+  assert_line "  \"login_url\": \"${MAIN}/user/reset/1/abc/def/login\""
+  refute_output --partial '"domains"'
+  run "${INFO}" --domain=news
+  assert_failure
+  assert_output "Couldn't list the Drupal Domain module's domains: Drush command terminated abnormally."
 }
 
 @test "refresh refuses the main checkout, a worktree without its own database, and a run without --yes" {
