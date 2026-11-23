@@ -414,9 +414,11 @@ fw::delete_project() {
   done < <(fw::project_volumes "$1")
 }
 
-# Locks are directories, since mkdir either makes one or fails. Each holds the
-# pid of the shell that took it, to tell when it's left by a process that has
-# exited, and its holder's token, so a command releases only a lock it holds.
+# Locks are files, made with noclobber, which opens a file with O_EXCL so it
+# either makes the file or fails. Not mkdir: from Ubuntu 26.04, mkdir is uutils,
+# which can succeed for each of several parallel calls. Each lock holds the pid
+# of the shell that took it, to tell when it's left by a process that has exited,
+# and its holder's token, so a command releases only a lock it holds.
 
 # fw::lock_token: a token that tells this lock holder from any other, including
 # subshells of this shell, which share its pid.
@@ -424,24 +426,34 @@ fw::lock_token() {
   printf '%s.%s.%s' "$$" "${BASHPID:-$(sh -c 'echo "$PPID"')}" "$RANDOM"
 }
 
-# fw::lock_holder DIR: the pid and token in the lock at DIR.
-fw::lock_holder() {
-  printf '%s %s' "$(cat "$1/pid" 2>/dev/null)" "$(cat "$1/owner" 2>/dev/null)"
+# fw::create_file FILE CONTENT: write CONTENT to FILE, failing if FILE exists.
+fw::create_file() {
+  (
+    set -C
+    printf '%s\n' "$2" >"$1"
+  ) 2>/dev/null
 }
 
-# fw::try_lock DIR [TOKEN]: take the lock at DIR as TOKEN's holder, clearing one
-# left by a process that has exited. Fails while a running process holds it.
+# fw::lock_holder LOCK: the pid and token in LOCK. Earlier versions made locks
+# as directories, with the pid in a file inside.
+fw::lock_holder() {
+  if [[ -d "$1" ]]; then
+    cat "$1/pid" 2>/dev/null
+  else
+    cat "$1" 2>/dev/null
+  fi
+}
+
+# fw::try_lock LOCK [TOKEN]: take LOCK as TOKEN's holder, clearing one left by a
+# process that has exited. Fails while a running process holds it.
 fw::try_lock() {
-  until mkdir "$1" 2>/dev/null; do
+  until fw::create_file "$1" "$$ ${2:-$$}"; do
     fw::clear_stale_lock "$1" || return 1
   done
-  # Write the token first, so a lock with a pid always has its token.
-  printf '%s\n' "${2:-$$}" >"$1/owner"
-  echo $$ >"$1/pid"
 }
 
-# fw::clear_stale_lock DIR: delete the lock at DIR when the process that took
-# it has exited. Fails while a running process holds it.
+# fw::clear_stale_lock LOCK: delete LOCK when the process that took it has
+# exited. Fails while a running process holds it.
 fw::clear_stale_lock() {
   local holder pid
   holder=$(fw::lock_holder "$1")
@@ -452,26 +464,27 @@ fw::clear_stale_lock() {
   # While this waiter checked the pid, the holder could release the lock and
   # exit, and another command take it. Delete the lock only if it's still the
   # one the waiter read, and only one waiter at a time, so two can't each clear
-  # it and take it. A waiter that exited while clearing left DIR.clear; clearing
-  # takes moments.
-  find "$1.clear" -maxdepth 0 -mmin +1 -exec rmdir {} \; 2>/dev/null || true
-  mkdir "$1.clear" 2>/dev/null || return 1
+  # it and take it. A waiter that exited while clearing left LOCK.clear;
+  # clearing takes moments.
+  find "$1.clear" -maxdepth 0 -mmin +1 -exec rm -rf {} \; 2>/dev/null || true
+  fw::create_file "$1.clear" "$$" || return 1
   if [[ "$(fw::lock_holder "$1")" != "$holder" ]]; then
-    rmdir "$1.clear"
+    rm -f "$1.clear"
     return 1
   fi
   rm -rf "$1"
-  rmdir "$1.clear"
+  rm -f "$1.clear"
 }
 
-# fw::release_lock DIR TOKEN: release the lock at DIR, unless another command
-# holds it.
+# fw::release_lock LOCK TOKEN: release LOCK, unless another command holds it.
 fw::release_lock() {
-  if [[ "$(cat "$1/owner" 2>/dev/null)" != "$2" ]]; then
+  local holder
+  holder=$(fw::lock_holder "$1")
+  if [[ "${holder#* }" != "$2" ]]; then
     fw::warn "Another command cleared $1 while this one held it."
     return 0
   fi
-  rm -rf "$1"
+  rm -f "$1"
 }
 
 fw::lock() {

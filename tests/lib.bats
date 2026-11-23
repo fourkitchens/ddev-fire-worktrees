@@ -538,8 +538,7 @@ other_checkout() {
   sh -c 'exit 0' &
   local pid=$!
   wait "$pid"
-  mkdir "$(fw::registry_file).lock"
-  echo "$pid" >"$(fw::registry_file).lock/pid"
+  echo "$pid crashed" >"$(fw::registry_file).lock"
   run fw::registry_add one /one
   assert_success
   run cat "$(fw::registry_file)"
@@ -548,20 +547,48 @@ other_checkout() {
   assert [ ! -e "$(fw::registry_file).lock.clear" ]
 }
 
+@test "a lock directory from an earlier version is held while its command runs, and cleared after" {
+  local lock="${TESTDIR}/test.lock" holder
+  sleep 30 &
+  holder=$!
+  mkdir "$lock"
+  echo "$holder" >"$lock/pid"
+  run fw::try_lock "$lock" new
+  assert_failure
+  kill "$holder"
+  wait "$holder" || true
+  fw::try_lock "$lock" new
+  run cat "$lock"
+  assert_output "$$ new"
+}
+
+@test "only one of many parallel attempts takes a lock" {
+  local lock="${TESTDIR}/test.lock" round i
+  for round in $(seq 1 20); do
+    rm -rf "$lock" "${TESTDIR}/took"
+    mkdir "${TESTDIR}/took"
+    for i in $(seq 1 16); do
+      (fw::try_lock "$lock" "t$i" && touch "${TESTDIR}/took/$i") &
+    done
+    wait
+    run ls "${TESTDIR}/took"
+    assert_equal "${#lines[@]}" 1
+  done
+}
+
 @test "a waiter keeps a lock that another command took after the holder exited" {
   local lock="${TESTDIR}/test.lock" exited
   sh -c 'exit 0' &
   exited=$!
   wait "$exited"
   # The holder held the lock when the waiter read its pid...
-  mkdir "$lock"
-  echo "$exited" >"$lock/pid"
+  echo "$exited holder" >"$lock"
   # ...then, before the waiter checked that pid, released it and exited, and
   # another command took it.
   kill() {
     if [[ "$1" == -0 && "$2" == "$exited" ]]; then
       unset -f kill
-      rm -rf "$lock"
+      rm -f "$lock"
       fw::try_lock "$lock" other
       return 1
     fi
@@ -570,8 +597,8 @@ other_checkout() {
   run fw::try_lock "$lock" waiter
   unset -f kill
   assert_failure
-  run cat "$lock/owner"
-  assert_output other
+  run cat "$lock"
+  assert_output "$$ other"
   assert [ ! -e "$lock.clear" ]
 }
 
@@ -579,13 +606,13 @@ other_checkout() {
   local lock="${TESTDIR}/test.lock"
   fw::try_lock "$lock" first
   # Something cleared the lock, and another command took it.
-  rm -rf "$lock"
+  rm -f "$lock"
   fw::try_lock "$lock" second
   run fw::release_lock "$lock" first
   assert_success
   assert_output --partial "cleared $lock"
-  run cat "$lock/owner"
-  assert_output second
+  run cat "$lock"
+  assert_output "$$ second"
   fw::release_lock "$lock" second
   assert [ ! -e "$lock" ]
 }
@@ -602,7 +629,7 @@ other_checkout() {
     _ "${DIR}/fire-worktrees/lib.sh"
   kill "$holder"
   assert_failure
-  assert [ -d "${DDEV_GLOBAL_DIR}/fire-worktree-start.lock" ]
+  assert [ -f "${DDEV_GLOBAL_DIR}/fire-worktree-start.lock" ]
 }
 
 @test "parallel starts record every worktree" {
