@@ -64,6 +64,8 @@ It's safe to rerun: an existing worktree keeps its project name and data.
   them. `ddev version` shows the directory as `global-ddev-dir`.
 * **Prune.** Startup records each worktree in `.git/fire-worktrees`, taking a short lock
   (`.git/fire-worktrees.lock`) so parallel starts, removes and prunes keep each other's entries.
+  Both locks are files that hold the pid and a token of the command that took them. A
+  waiter clears a lock whose command has exited, and a command releases only a lock it holds.
   Prune deletes only recorded projects whose checkout is gone: no checkout that Git lists for the
   repository has the project's name in its generated config, so a worktree moved with
   `git worktree move` keeps its environment. Without the checkout, `ddev delete` can't find add-on
