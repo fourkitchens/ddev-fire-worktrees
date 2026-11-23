@@ -414,24 +414,70 @@ fw::delete_project() {
   done < <(fw::project_volumes "$1")
 }
 
-# fw::try_lock DIR: take the lock at DIR, clearing one left by a process that
-# has exited. Fails while a running process holds it.
+# Locks are directories, since mkdir either makes one or fails. Each holds the
+# pid of the shell that took it, to tell when it's left by a process that has
+# exited, and its holder's token, so a command releases only a lock it holds.
+
+# fw::lock_token: a token that tells this lock holder from any other, including
+# subshells of this shell, which share its pid.
+fw::lock_token() {
+  printf '%s.%s.%s' "$$" "${BASHPID:-$(sh -c 'echo "$PPID"')}" "$RANDOM"
+}
+
+# fw::lock_holder DIR: the pid and token in the lock at DIR.
+fw::lock_holder() {
+  printf '%s %s' "$(cat "$1/pid" 2>/dev/null)" "$(cat "$1/owner" 2>/dev/null)"
+}
+
+# fw::try_lock DIR [TOKEN]: take the lock at DIR as TOKEN's holder, clearing one
+# left by a process that has exited. Fails while a running process holds it.
 fw::try_lock() {
-  local pid
   until mkdir "$1" 2>/dev/null; do
-    pid=$(cat "$1/pid" 2>/dev/null || true)
-    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-      rm -rf "$1"
-      continue
-    fi
-    return 1
+    fw::clear_stale_lock "$1" || return 1
   done
+  # Write the token first, so a lock with a pid always has its token.
+  printf '%s\n' "${2:-$$}" >"$1/owner"
   echo $$ >"$1/pid"
+}
+
+# fw::clear_stale_lock DIR: delete the lock at DIR when the process that took
+# it has exited. Fails while a running process holds it.
+fw::clear_stale_lock() {
+  local holder pid
+  holder=$(fw::lock_holder "$1")
+  pid=${holder%% *}
+  if [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  # While this waiter checked the pid, the holder could release the lock and
+  # exit, and another command take it. Delete the lock only if it's still the
+  # one the waiter read, and only one waiter at a time, so two can't each clear
+  # it and take it. A waiter that exited while clearing left DIR.clear; clearing
+  # takes moments.
+  find "$1.clear" -maxdepth 0 -mmin +1 -exec rmdir {} \; 2>/dev/null || true
+  mkdir "$1.clear" 2>/dev/null || return 1
+  if [[ "$(fw::lock_holder "$1")" != "$holder" ]]; then
+    rmdir "$1.clear"
+    return 1
+  fi
+  rm -rf "$1"
+  rmdir "$1.clear"
+}
+
+# fw::release_lock DIR TOKEN: release the lock at DIR, unless another command
+# holds it.
+fw::release_lock() {
+  if [[ "$(cat "$1/owner" 2>/dev/null)" != "$2" ]]; then
+    fw::warn "Another command cleared $1 while this one held it."
+    return 0
+  fi
+  rm -rf "$1"
 }
 
 fw::lock() {
   local waited=0
-  while ! fw::try_lock "$FW_LOCK"; do
+  FW_LOCK_TOKEN=$(fw::lock_token)
+  while ! fw::try_lock "$FW_LOCK" "$FW_LOCK_TOKEN"; do
     if ((waited % 30 == 0)); then
       echo 'Waiting for another worktree to finish starting...'
     fi
@@ -441,11 +487,11 @@ fw::lock() {
     sleep 2
     waited=$((waited + 2))
   done
-  trap 'rm -rf "$FW_LOCK"' EXIT
+  trap 'fw::release_lock "$FW_LOCK" "$FW_LOCK_TOKEN"' EXIT
 }
 
 fw::unlock() {
-  rm -rf "$FW_LOCK"
+  fw::release_lock "$FW_LOCK" "$FW_LOCK_TOKEN"
   trap - EXIT
 }
 
@@ -475,19 +521,20 @@ fw::registry_file() {
 # that's held through ddev start. Take it only while not holding the start lock,
 # since each sets the EXIT trap.
 fw::with_registry_lock() {
-  local lock waited=0 status=0
+  local lock token waited=0 status=0
   lock="$(fw::registry_file).lock"
-  while ! fw::try_lock "$lock"; do
+  token=$(fw::lock_token)
+  while ! fw::try_lock "$lock" "$token"; do
     if ((waited >= 300)); then
       fw::die "Timed out waiting for $lock. Delete it if no other fire-worktree command is running."
     fi
     sleep 0.1
     waited=$((waited + 1))
   done
-  # shellcheck disable=SC2064 # Expand now; lock is local.
-  trap "rm -rf $(printf '%q' "$lock")" EXIT
+  # shellcheck disable=SC2064 # Expand now; lock and token are local.
+  trap "fw::release_lock $(printf '%q' "$lock") $(printf '%q' "$token")" EXIT
   "$@" || status=$?
-  rm -rf "$lock"
+  fw::release_lock "$lock" "$token"
   trap - EXIT
   return "$status"
 }

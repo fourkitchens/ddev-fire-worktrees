@@ -545,6 +545,49 @@ other_checkout() {
   run cat "$(fw::registry_file)"
   assert_output "$(printf 'one\t/one')"
   assert [ ! -e "$(fw::registry_file).lock" ]
+  assert [ ! -e "$(fw::registry_file).lock.clear" ]
+}
+
+@test "a waiter keeps a lock that another command took after the holder exited" {
+  local lock="${TESTDIR}/test.lock" exited
+  sh -c 'exit 0' &
+  exited=$!
+  wait "$exited"
+  # The holder held the lock when the waiter read its pid...
+  mkdir "$lock"
+  echo "$exited" >"$lock/pid"
+  # ...then, before the waiter checked that pid, released it and exited, and
+  # another command took it.
+  kill() {
+    if [[ "$1" == -0 && "$2" == "$exited" ]]; then
+      unset -f kill
+      rm -rf "$lock"
+      fw::try_lock "$lock" other
+      return 1
+    fi
+    command kill "$@"
+  }
+  run fw::try_lock "$lock" waiter
+  unset -f kill
+  assert_failure
+  run cat "$lock/owner"
+  assert_output other
+  assert [ ! -e "$lock.clear" ]
+}
+
+@test "releasing a lock leaves it when another command holds it" {
+  local lock="${TESTDIR}/test.lock"
+  fw::try_lock "$lock" first
+  # Something cleared the lock, and another command took it.
+  rm -rf "$lock"
+  fw::try_lock "$lock" second
+  run fw::release_lock "$lock" first
+  assert_success
+  assert_output --partial "cleared $lock"
+  run cat "$lock/owner"
+  assert_output second
+  fw::release_lock "$lock" second
+  assert [ ! -e "$lock" ]
 }
 
 @test "starts take turns whatever their TMPDIR" {
