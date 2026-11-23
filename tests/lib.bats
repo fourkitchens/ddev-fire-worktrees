@@ -606,28 +606,42 @@ other_checkout() {
 }
 
 @test "parallel starts record every worktree" {
-  printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
-  git_site
-  local i
-  for i in 1 2 3 4; do
-    git -C "${SITE}" worktree add -q -b "feature/$i" "${TESTDIR}/site-feature-$i"
-  done
-
+  # TEMP(#71): repeat, with a lock event log printed for a failed round.
+  local i round base
   # Start without Docker or DDEV.
   ddev() { :; }
   docker() { :; }
   unset WORKTREE_SOURCE_ROOT
-  for i in 1 2 3 4; do
-    (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
+  base=$TESTDIR
+  for round in $(seq 1 15); do
+    TESTDIR="${base}/round-${round}"
+    SITE="${TESTDIR}/site"
+    mkdir -p "${SITE}/.ddev"
+    export FW_LOCK_LOG="${TESTDIR}/locklog"
+    printf 'name: mysite\ntype: php\n' >"${SITE}/.ddev/config.yaml"
+    git_site
+    for i in 1 2 3 4; do
+      git -C "${SITE}" worktree add -q -b "feature/$i" "${TESTDIR}/site-feature-$i"
+    done
+    for i in 1 2 3 4; do
+      (fw::start_worktree "${TESTDIR}/site-feature-$i" fresh false >/dev/null) &
+    done
+    wait
+    if [[ "$(grep -cxF "/.ddev/${FW_CONFIG_NAME}" "${SITE}/.git/info/exclude")" != 1 ]] ||
+      [[ "$(grep -cxF "/.ddev/${FW_LOG_NAME}" "${SITE}/.git/info/exclude")" != 1 ]]; then
+      echo "round $round failed; lock log:"
+      cat "$FW_LOCK_LOG"
+    fi
+    cut -f2 "${SITE}/.git/fire-worktrees" | sort >"${TESTDIR}/recorded"
+    run cat "${TESTDIR}/recorded"
+    assert_output "$(printf '%s\n' "${TESTDIR}"/site-feature-{1,2,3,4} | sort)"
+    run grep -cxF "/.ddev/${FW_CONFIG_NAME}" "${SITE}/.git/info/exclude"
+    assert_output 1
+    run grep -cxF "/.ddev/${FW_LOG_NAME}" "${SITE}/.git/info/exclude"
+    assert_output 1
   done
-  wait
-  cut -f2 "${SITE}/.git/fire-worktrees" | sort >"${TESTDIR}/recorded"
-  run cat "${TESTDIR}/recorded"
-  assert_output "$(printf '%s\n' "${TESTDIR}"/site-feature-{1,2,3,4} | sort)"
-  run grep -cxF "/.ddev/${FW_CONFIG_NAME}" "${SITE}/.git/info/exclude"
-  assert_output 1
-  run grep -cxF "/.ddev/${FW_LOG_NAME}" "${SITE}/.git/info/exclude"
-  assert_output 1
+  TESTDIR=$base
+  unset FW_LOCK_LOG
 }
 
 @test "start points at prune when the registry lists environments whose checkout is gone, and keeps them" {

@@ -418,6 +418,20 @@ fw::delete_project() {
 # pid of the shell that took it, to tell when it's left by a process that has
 # exited, and its holder's token, so a command releases only a lock it holds.
 
+# TEMP(#71): log lock events to FW_LOCK_LOG, with the real pid and parent of
+# the (sub)shell, so a failed test shows who cleared a held lock.
+fw::lock_log() {
+  [[ -n "${FW_LOCK_LOG:-}" ]] || return 0
+  local stat='' parent='?'
+  if [[ -n "${BASHPID:-}" && -r "/proc/$BASHPID/stat" ]]; then
+    read -r stat <"/proc/$BASHPID/stat" || true
+    parent=${stat#*) }
+    parent=${parent#* }
+    parent=${parent%% *}
+  fi
+  printf '%s $$=%s bashpid=%s parent=%s sub=%s %s [%s]\n' "${EPOCHREALTIME:-}" "$$" "${BASHPID:-}" "$parent" "${BASH_SUBSHELL:-}" "$*" "${FUNCNAME[*]:1}" >>"$FW_LOCK_LOG"
+}
+
 # fw::lock_token: a token that tells this lock holder from any other, including
 # subshells of this shell, which share its pid.
 fw::lock_token() {
@@ -438,6 +452,7 @@ fw::try_lock() {
   # Write the token first, so a lock with a pid always has its token.
   printf '%s\n' "${2:-$$}" >"$1/owner"
   echo $$ >"$1/pid"
+  fw::lock_log "take ${1##*/} token=${2:-$$}"
 }
 
 # fw::clear_stale_lock DIR: delete the lock at DIR when the process that took
@@ -449,6 +464,7 @@ fw::clear_stale_lock() {
   if [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null; then
     return 1
   fi
+  fw::lock_log "stale? ${1##*/} holder=[$holder] kill=[$(kill -0 "$pid" 2>&1)] again=[$(fw::lock_holder "$1")]"
   # While this waiter checked the pid, the holder could release the lock and
   # exit, and another command take it. Delete the lock only if it's still the
   # one the waiter read, and only one waiter at a time, so two can't each clear
@@ -460,6 +476,7 @@ fw::clear_stale_lock() {
     rmdir "$1.clear"
     return 1
   fi
+  fw::lock_log "clear ${1##*/} holder=[$holder]"
   rm -rf "$1"
   rmdir "$1.clear"
 }
@@ -467,6 +484,7 @@ fw::clear_stale_lock() {
 # fw::release_lock DIR TOKEN: release the lock at DIR, unless another command
 # holds it.
 fw::release_lock() {
+  fw::lock_log "release ${1##*/} token=$2 owner=$(cat "$1/owner" 2>/dev/null)"
   if [[ "$(cat "$1/owner" 2>/dev/null)" != "$2" ]]; then
     fw::warn "Another command cleared $1 while this one held it."
     return 0
@@ -532,7 +550,7 @@ fw::with_registry_lock() {
     waited=$((waited + 1))
   done
   # shellcheck disable=SC2064 # Expand now; lock and token are local.
-  trap "fw::release_lock $(printf '%q' "$lock") $(printf '%q' "$token")" EXIT
+  trap "fw::lock_log trap-fired; fw::release_lock $(printf '%q' "$lock") $(printf '%q' "$token")" EXIT
   "$@" || status=$?
   fw::release_lock "$lock" "$token"
   trap - EXIT
