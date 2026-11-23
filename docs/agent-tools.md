@@ -84,7 +84,9 @@ and age, and a new login link:
 database, as after `ddev fire-worktree-remove --keep-checkout`. Run `ddev fire-worktree-start` to
 copy one in, not `ddev start`, which creates an empty one. `database.created` is when startup or the
 last refresh created the database, in UTC, or `null` when that's unknown or there's no database.
-`login_url` is `null` when the project isn't running or isn't Drupal.
+`login_url` is `null` when the project isn't running or isn't Drupal. A site with the Drupal Domain
+module also gets a `domains` array, and `--domain=<machine name>` makes `login_url` that domain's
+link. See [Logging in on each domain](drupal.md#logging-in-on-each-domain).
 
 To give a worktree a new copy of the database, run `ddev fire-worktree-refresh --yes` in it.
 

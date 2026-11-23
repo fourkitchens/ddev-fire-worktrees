@@ -822,6 +822,65 @@ fw::login_link() {
   return "$status"
 }
 
+# fw::has_domain_module DIR: true when DIR's Composer files require the Drupal
+# Domain module, so it's worth asking Drupal for its domains.
+fw::has_domain_module() {
+  local root
+  root=$(fw::config_scalar "$1" composer_root)
+  grep -qsF '"drupal/domain"' "$1/${root:+$root/}composer.json" "$1/${root:+$root/}composer.lock"
+}
+
+# FW_DOMAINS_PHP: prints each active Domain record as Drupal resolves it for the
+# request Drush makes, with environment aliases applied: a marker, then the
+# machine name, 1 for the default domain else 0, the URL and the label, separated
+# by tabs. Prints nothing when the Domain module isn't enabled, as on Drupal 7.
+# Drupal can print an HTML warning to stdout with no newline, hence the marker.
+# shellcheck disable=SC2016 # PHP, not shell.
+FW_DOMAINS_PHP='if (!class_exists("Drupal") || !\Drupal::moduleHandler()->moduleExists("domain")) return;
+foreach (\Drupal::entityTypeManager()->getStorage("domain")->loadMultipleSorted() as $d) {
+  if ($d->status()) echo "fire-worktree-domain\t", $d->id(), "\t", (int) $d->isDefault(), "\t", rtrim($d->getPath(), "/"), "\t", trim(preg_replace("/\s+/", " ", $d->label())), "\n";
+}'
+
+# fw::domains URL: the active Drupal Domain records of the site at URL, one per
+# line as ID, DEFAULT (1 or 0), URL and LABEL separated by tabs, from one Drush
+# call. Run it in the worktree while its project is running. Prints nothing
+# without the Domain module. On a Drush failure, prints the first line of
+# Drush's error instead, and fails.
+fw::domains() {
+  local tmp status=0
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/fire-worktree-domains.XXXXXX") || return 1
+  if ddev drush php:eval --uri="$1" "$FW_DOMAINS_PHP" >"$tmp/out" 2>"$tmp/err"; then
+    awk -F '\t' '
+      { sub(/\r$/, "") }
+      /fire-worktree-domain\t/ { sub(/.*fire-worktree-domain\t/, ""); print }' "$tmp/out"
+  else
+    fw::error_line "$tmp/err"
+    status=1
+  fi
+  rm -rf "$tmp"
+  return "$status"
+}
+
+# fw::find_domain DOMAINS NAME: the line of DOMAINS, fw::domains output, whose
+# machine name is NAME, or whose hostname is NAME's, NAME being a hostname or a
+# URL. Fails when none is.
+fw::find_domain() {
+  local host
+  host=$(printf '%s' "$2" | sed -E 's#^[A-Za-z]+://##; s#/.*$##' | tr '[:upper:]' '[:lower:]')
+  printf '%s\n' "$1" | awk -F '\t' -v name="$2" -v host="$host" '
+    $1 == name { print; found = 1; exit }
+    {
+      h = tolower($3)
+      sub(/^[a-z]+:\/\//, "", h)
+      sub(/\/.*$/, "", h)
+      if (h == host && first == "") first = $0
+    }
+    END {
+      if (!found && first != "") { print first; found = 1 }
+      exit !found
+    }'
+}
+
 # fw::check_git_metadata FILE...: warn when Drush's output in FILE shows Drupal
 # reading Git metadata that a worktree's container can't read: a /.git/ path,
 # which fails because .git is a file there, or git's "not a git repository",

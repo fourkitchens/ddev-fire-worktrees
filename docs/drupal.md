@@ -82,6 +82,30 @@ worktree to another site with `ddev fire-worktree-refresh --db=fresh`, then
 `fire build --site-name=<site>`. In a multisite with a database per site, make the build command run
 `drush deploy` for each site.
 
+### Logging in on each domain
+
+With the [Domain](https://www.drupal.org/project/domain) module in the project's `composer.json` or
+`composer.lock`, `ddev fire-worktree-info` asks Drupal for its active domains, with one Drush call,
+and lists each one's label and the URL it answers on in the worktree, settings overrides and aliases
+applied. The login link is for the default domain:
+
+```
+Login:     https://acme-abc-123-1234567890.ddev.site/user/reset/1/…/login
+Domains:   Main  https://acme-abc-123-1234567890.ddev.site       (default)
+           News  https://news.acme-abc-123-1234567890.ddev.site  ddev fire-worktree-info --domain=news
+           Shop  https://shop.acme-abc-123-1234567890.ddev.site  ddev fire-worktree-info --domain=shop
+```
+
+Drupal sessions are per hostname, so to log in on another domain, run the command on its line.
+`--domain` takes a domain's machine name or hostname and makes a new login link for that domain only.
+Make each link when you need it: Drupal builds one-time links from the account's last login time, so
+using one invalidates every link made before it, including links for other domains.
+
+With `--json`, the output has a `domains` array, each entry with `id`, `label`, `url`, `default` and
+`login_command`, and with `--domain`, `login_url` is that domain's link. Without the Domain module,
+or while the project is stopped, the output has no domains. If Drush can't list them,
+`fire-worktree-info` warns and prints the rest.
+
 ## Search
 
 Search servers that run in DDEV, such as Solr, keep their data in volumes that belong to each
